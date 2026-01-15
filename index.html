@@ -172,7 +172,9 @@
                     
                     // Debug: Log first item structure
                     if (allLegislation.length > 0) {
-                        console.log('Sample legislation item:', allLegislation[0]);
+                        console.log('Sample legislation item from allLegislation:', allLegislation[0]);
+                        console.log('referredToCommittees value:', allLegislation[0].referredToCommittees);
+                        console.log('Type:', typeof allLegislation[0].referredToCommittees);
                     }
 
                     const transformedItems = allLegislation.map(leg => ({
