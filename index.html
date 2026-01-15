@@ -81,14 +81,24 @@
             }, [selectedItems, itemNotes, trackedKeywords]);
 
             const proxyFetch = async (endpoint, method = 'GET', body = null) => {
-                const params = new URLSearchParams({ endpoint, method });
-                if (body) params.append('body', JSON.stringify(body));
-                
-                const response = await fetch(`${PROXY_URL}?${params.toString()}`);
-                const data = await response.json();
-                
-                if (data.error) throw new Error(data.error);
-                return data;
+                try {
+                    const params = new URLSearchParams({ endpoint, method });
+                    if (body) params.append('body', JSON.stringify(body));
+                    
+                    const url = `${PROXY_URL}?${params.toString()}`;
+                    console.log('Fetching from proxy:', url);
+                    
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    
+                    console.log('Proxy response:', data);
+                    
+                    if (data.error) throw new Error(data.error);
+                    return data;
+                } catch (error) {
+                    console.error('Proxy fetch error:', error);
+                    throw error;
+                }
             };
 
             const loadCouncilPeriods = async () => {
@@ -113,6 +123,8 @@
                 setError(null);
                 
                 try {
+                    console.log('Starting search with council period:', selectedPeriod.councilPeriodId);
+                    
                     const searchPromises = trackedKeywords.map(keyword =>
                         proxyFetch('/SearchLegislation', 'POST', {
                             Keyword: keyword,
@@ -120,10 +132,14 @@
                             CouncilPeriodId: selectedPeriod.councilPeriodId,
                             RowLimit: 20,
                             OffSet: 0
+                        }).catch(err => {
+                            console.error(`Error searching for "${keyword}":`, err);
+                            return { legislationSearchResults: [] };
                         })
                     );
 
                     const results = await Promise.all(searchPromises);
+                    console.log('Search results:', results);
                     
                     const allLegislation = [];
                     const seenIds = new Set();
@@ -139,6 +155,8 @@
                         }
                     });
 
+                    console.log('Total unique legislation found:', allLegislation.length);
+
                     const transformedItems = allLegislation.map(leg => ({
                         id: leg.legislationNumber,
                         title: leg.title,
@@ -149,12 +167,15 @@
                         date: leg.introductionDate ? new Date(leg.introductionDate).toISOString().split('T')[0] : '',
                         description: leg.shortTitle || leg.title,
                         link: `https://lims.dccouncil.gov/Legislation/${leg.legislationNumber}`,
+                        source: 'DC Council',
                         isNew: isNewItem(leg.introductionDate)
                     }));
 
+                    console.log('Transformed items:', transformedItems.length);
                     setItems(transformedItems);
                     setLoading(false);
                 } catch (err) {
+                    console.error('Error in refreshData:', err);
                     setError('Failed to fetch legislation: ' + err.message);
                     setLoading(false);
                 }
