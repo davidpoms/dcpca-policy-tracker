@@ -27,6 +27,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'endpoint parameter required' });
   }
 
+  const API_KEY = process.env.LIMS_API_KEY;
   const url = `https://lims.dccouncil.gov/api/v2/PublicData${endpoint}`;
 
   try {
@@ -34,7 +35,8 @@ export default async function handler(req, res) {
       method: method,
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${API_KEY}`
       }
     };
 
