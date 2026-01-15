@@ -164,22 +164,30 @@
                     });
 
                     console.log('Total unique legislation found:', allLegislation.length);
+                    
+                    // Debug: Log first item structure
+                    if (allLegislation.length > 0) {
+                        console.log('Sample legislation item:', allLegislation[0]);
+                    }
 
                     const transformedItems = allLegislation.map(leg => ({
                         id: leg.legislationNumber,
                         title: leg.title,
                         billNumber: leg.legislationNumber,
-                        category: leg.legislationCategoryName || 'Unknown',
-                        status: leg.currentStatus || 'Unknown',
-                        committees: leg.introCommittee ? [leg.introCommittee] : [],
+                        category: leg.legislationCategoryName || leg.category || 'Uncategorized',
+                        status: leg.currentStatus || leg.status || 'Unknown',
+                        committees: leg.introCommittee ? [leg.introCommittee] : (leg.committees || []),
                         date: leg.introductionDate ? new Date(leg.introductionDate).toISOString().split('T')[0] : '',
-                        description: leg.shortTitle || leg.title,
+                        description: leg.shortTitle || leg.description || leg.title,
                         link: `https://lims.dccouncil.gov/Legislation/${leg.legislationNumber}`,
                         source: 'DC Council',
-                        isNew: isNewItem(leg.introductionDate)
+                        isNew: isNewItem(leg.introductionDate || leg.date)
                     }));
 
                     console.log('Transformed items:', transformedItems.length);
+                    if (transformedItems.length > 0) {
+                        console.log('Sample transformed item:', transformedItems[0]);
+                    }
                     setItems(transformedItems);
                     setLoading(false);
                 } catch (err) {
@@ -303,8 +311,8 @@
                 return matchesKeyword && matchesCommittee && matchesCategory;
             });
 
-            const categories = ['all', ...new Set(items.map(i => i.category))];
-            const committees = ['all', ...new Set(items.filter(i => i.committees).flatMap(i => i.committees))];
+            const categories = ['all', ...new Set(items.map(i => i.category).filter(Boolean))];
+            const committees = ['all', ...new Set(items.filter(i => i.committees && i.committees.length > 0).flatMap(i => i.committees).filter(Boolean))];
 
             return (
                 <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 p-6">
