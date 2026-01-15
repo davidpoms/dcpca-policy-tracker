@@ -96,3 +96,76 @@ function parseRegulationsFromCategory(html, category) {
   for (const row of rows) {
     // Skip header rows
     if (row.includes('<thead') || row.includes('<th>')) continue;
+    
+    // Extract Notice ID (like N143740)
+    const noticeMatch = row.match(/>((N\d+))<\/a>/);
+    if (!noticeMatch) continue;
+    
+    const noticeId = noticeMatch[2];
+    
+    // Extract subject/title
+    const subjectMatch = row.match(/lblSubject[^>]*>([^<]+)<\/span>/i);
+    const subject = subjectMatch ? subjectMatch[1].trim() : 'Regulation Notice';
+    
+    // Extract section number
+    const sectionMatch = row.match(/SectionNumber=([^"&]+)/);
+    const sectionNumber = sectionMatch ? sectionMatch[1] : null;
+    
+    // Extract date
+    const dateMatch = row.match(/lblActiondate[^>]*>([^<]+)<\/span>/i);
+    const date = dateMatch ? dateMatch[1].trim() : new Date().toISOString().split('T')[0];
+    
+    // Extract register issue (Vol 73/2)
+    const volMatch = row.match(/>Vol\s+(\d+\/\d+)<\/a>/i);
+    const registerIssue = volMatch ? volMatch[1] : null;
+    
+    regulations.push({
+      id: noticeId,
+      title: subject,
+      agency: extractAgency(subject),
+      category: category,
+      status: category,
+      sectionNumber: sectionNumber,
+      registerIssue: registerIssue,
+      date: date,
+      detailLink: `https://www.dcregs.dc.gov/Common/NoticeDetail.aspx?NoticeId=${noticeId}`,
+      source: 'Municipal Register',
+      isNew: isWithinDays(date, 7)
+    });
+  }
+  
+  return regulations;
+}
+
+function extractAgency(text) {
+  if (!text) return 'DC Government';
+  
+  const agencies = [
+    'Alcoholic Beverage and Cannabis Administration',
+    'Department of Health',
+    'Department of Transportation',
+    'Department of Energy and Environment',
+    'Department of Housing and Community Development',
+    'Office of the Chief Financial Officer',
+    'Metropolitan Police Department'
+  ];
+  
+  for (const agency of agencies) {
+    if (text.toLowerCase().includes(agency.toLowerCase())) return agency;
+  }
+  
+  const dashMatch = text.match(/^([^-]+)/);
+  return dashMatch ? dashMatch[1].trim() : 'DC Government';
+}
+
+function isWithinDays(dateString, days) {
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return false;
+    const now = new Date();
+    const diffDays = (now - date) / (1000 * 60 * 60 * 24);
+    return diffDays >= 0 && diffDays <= days;
+  } catch (e) {
+    return false;
+  }
+}
