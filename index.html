@@ -8,6 +8,7 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
     <div id="root"></div>
@@ -15,16 +16,25 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
+        // Initialize Supabase client
+        // IMPORTANT: Replace these with your actual Supabase URL and anon key
+        const SUPABASE_URL = 'https://owqylzpuxwsldepufxep.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_IWFsW7Fp1xUzKkr82yVavw_wu236ZdP'; // Get this from Supabase dashboard
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
         function DCPolicyTracker() {
             const [items, setItems] = useState([]);
             const [filters, setFilters] = useState({
                 keywords: '',
                 committee: 'all',
-                category: 'all'
+                category: 'all',
+                assignedTo: 'all',
+                priority: 'all'
             });
             const [selectedItems, setSelectedItems] = useState(new Set());
             const [itemNotes, setItemNotes] = useState({});
-            const [trackedKeywords, setTrackedKeywords] = useState(['housing', 'transportation', 'environment']);
+            const [trackedKeywords, setTrackedKeywords] = useState([]);
+            const [teamMembers, setTeamMembers] = useState([]);
             const [councilPeriods, setCouncilPeriods] = useState([]);
             const [selectedPeriod, setSelectedPeriod] = useState(null);
             const [loading, setLoading] = useState(false);
@@ -34,51 +44,139 @@
             const [editingNote, setEditingNote] = useState(null);
             const [noteText, setNoteText] = useState('');
             const [showManualEntry, setShowManualEntry] = useState(false);
+            const [showActivityLog, setShowActivityLog] = useState(false);
+            const [activityLog, setActivityLog] = useState([]);
             const [manualEntry, setManualEntry] = useState({
                 title: '',
                 agency: '',
                 status: 'Published',
                 date: new Date().toISOString().split('T')[0],
-                link: ''
+                link: '',
+                assignedTo: 'Unassigned',
+                priority: 'medium'
             });
 
             const PROXY_URL = 'https://dc-lims-proxy.vercel.app/api/hello';
 
             useEffect(() => {
-                loadFromStorage();
+                loadFromSupabase();
                 loadCouncilPeriods();
             }, []);
 
-            const loadFromStorage = () => {
+            // Load all data from Supabase
+            const loadFromSupabase = async () => {
                 try {
-                    const saved = localStorage.getItem('dc-tracker-data');
-                    if (saved) {
-                        const data = JSON.parse(saved);
-                        setSelectedItems(new Set(data.selectedItems || []));
-                        setItemNotes(data.itemNotes || {});
-                        setTrackedKeywords(data.trackedKeywords || ['housing', 'transportation', 'environment']);
+                    // Load tracked items
+                    const { data: trackedData, error: trackedError } = await supabase
+                        .from('tracked_items')
+                        .select('*')
+                        .order('tracked_at', { ascending: false });
+                    
+                    if (trackedError) throw trackedError;
+                    
+                    if (trackedData) {
+                        const itemsSet = new Set(trackedData.map(item => item.id));
+                        setSelectedItems(itemsSet);
+                        
+                        // Convert tracked items to display format
+                        const displayItems = trackedData.map(item => ({
+                            id: item.id,
+                            title: item.title,
+                            billNumber: item.bill_number,
+                            category: item.category,
+                            status: item.status,
+                            committees: item.committees || [],
+                            date: item.date,
+                            description: item.description,
+                            link: item.link,
+                            source: item.source,
+                            agency: item.agency,
+                            isNew: item.is_new,
+                            assignedTo: item.assigned_to,
+                            priority: item.priority
+                        }));
+                        setItems(displayItems);
                     }
-                } catch (e) {
-                    console.error('Error loading from storage:', e);
+
+                    // Load notes
+                    const { data: notesData, error: notesError } = await supabase
+                        .from('item_notes')
+                        .select('*');
+                    
+                    if (notesError) throw notesError;
+                    
+                    if (notesData) {
+                        const notesMap = {};
+                        notesData.forEach(note => {
+                            notesMap[note.item_id] = note.note_text;
+                        });
+                        setItemNotes(notesMap);
+                    }
+
+                    // Load keywords
+                    const { data: keywordsData, error: keywordsError } = await supabase
+                        .from('tracked_keywords')
+                        .select('*')
+                        .order('added_at', { ascending: true });
+                    
+                    if (keywordsError) throw keywordsError;
+                    
+                    if (keywordsData) {
+                        setTrackedKeywords(keywordsData.map(k => k.keyword));
+                    }
+
+                    // Load team members
+                    const { data: membersData, error: membersError } = await supabase
+                        .from('team_members')
+                        .select('*')
+                        .eq('active', true)
+                        .order('name', { ascending: true });
+                    
+                    if (membersError) throw membersError;
+                    
+                    if (membersData) {
+                        setTeamMembers(membersData);
+                    }
+
+                } catch (err) {
+                    console.error('Error loading from Supabase:', err);
+                    setError('Failed to load data: ' + err.message);
                 }
             };
 
-            const saveToStorage = () => {
+            // Log activity to database
+            const logActivity = async (action, itemId, itemTitle, details = {}) => {
                 try {
-                    const data = {
-                        selectedItems: Array.from(selectedItems),
-                        itemNotes,
-                        trackedKeywords
-                    };
-                    localStorage.setItem('dc-tracker-data', JSON.stringify(data));
-                } catch (e) {
-                    console.error('Error saving to storage:', e);
+                    const { error } = await supabase
+                        .from('activity_log')
+                        .insert({
+                            action,
+                            item_id: itemId,
+                            item_title: itemTitle,
+                            details
+                        });
+                    
+                    if (error) console.error('Error logging activity:', error);
+                } catch (err) {
+                    console.error('Error logging activity:', err);
                 }
             };
 
-            useEffect(() => {
-                saveToStorage();
-            }, [selectedItems, itemNotes, trackedKeywords]);
+            // Load activity log
+            const loadActivityLog = async () => {
+                try {
+                    const { data, error } = await supabase
+                        .from('activity_log')
+                        .select('*')
+                        .order('created_at', { ascending: false })
+                        .limit(100);
+                    
+                    if (error) throw error;
+                    setActivityLog(data || []);
+                } catch (err) {
+                    console.error('Error loading activity log:', err);
+                }
+            };
 
             const proxyFetch = async (endpoint, method = 'GET', body = null) => {
                 try {
@@ -168,11 +266,28 @@
                             description: leg.shortDescription || leg.title,
                             link: leg.introductionDocumentURL || `https://lims.dccouncil.gov/Legislation/${leg.legislationNumber}`,
                             source: 'DC Council',
-                            isNew: isNewItem(leg.introductionDate)
+                            isNew: isNewItem(leg.introductionDate),
+                            assignedTo: null,
+                            priority: null
                         };
                     });
 
-                    setItems(transformedItems);
+                    // Merge with existing tracked items (to preserve assignments and priorities)
+                    const mergedItems = transformedItems.map(item => {
+                        if (selectedItems.has(item.id)) {
+                            const existing = items.find(i => i.id === item.id);
+                            if (existing) {
+                                return {
+                                    ...item,
+                                    assignedTo: existing.assignedTo,
+                                    priority: existing.priority
+                                };
+                            }
+                        }
+                        return item;
+                    });
+
+                    setItems(mergedItems);
                     setLoading(false);
                 } catch (err) {
                     console.error('Error in refreshData:', err);
@@ -188,43 +303,220 @@
                 return daysSince <= 7;
             };
 
-            const toggleSelection = (itemId) => {
-                const newSelected = new Set(selectedItems);
-                if (newSelected.has(itemId)) {
-                    newSelected.delete(itemId);
-                } else {
-                    newSelected.add(itemId);
+            const toggleSelection = async (itemId) => {
+                const item = items.find(i => i.id === itemId);
+                if (!item) return;
+
+                const isCurrentlySelected = selectedItems.has(itemId);
+                
+                try {
+                    if (isCurrentlySelected) {
+                        // Untrack item - delete from database
+                        const { error } = await supabase
+                            .from('tracked_items')
+                            .delete()
+                            .eq('id', itemId);
+                        
+                        if (error) throw error;
+                        
+                        const newSelected = new Set(selectedItems);
+                        newSelected.delete(itemId);
+                        setSelectedItems(newSelected);
+                        
+                        await logActivity('item_untracked', itemId, item.title);
+                    } else {
+                        // Track item - insert into database
+                        const { error } = await supabase
+                            .from('tracked_items')
+                            .insert({
+                                id: item.id,
+                                title: item.title,
+                                bill_number: item.billNumber,
+                                category: item.category,
+                                status: item.status,
+                                committees: item.committees,
+                                date: item.date,
+                                description: item.description,
+                                link: item.link,
+                                source: item.source,
+                                agency: item.agency,
+                                is_manual_entry: item.source === 'Municipal Register',
+                                is_new: item.isNew,
+                                assigned_to: 'Unassigned',
+                                priority: 'medium'
+                            });
+                        
+                        if (error) throw error;
+                        
+                        const newSelected = new Set(selectedItems);
+                        newSelected.add(itemId);
+                        setSelectedItems(newSelected);
+                        
+                        // Update the item with default assignment and priority
+                        setItems(items.map(i => 
+                            i.id === itemId 
+                                ? { ...i, assignedTo: 'Unassigned', priority: 'medium' }
+                                : i
+                        ));
+                        
+                        await logActivity('item_tracked', itemId, item.title, {
+                            source: item.source,
+                            category: item.category
+                        });
+                    }
+                } catch (err) {
+                    console.error('Error toggling selection:', err);
+                    setError('Failed to update tracking: ' + err.message);
                 }
-                setSelectedItems(newSelected);
             };
 
-            const saveNote = () => {
-                if (editingNote) {
+            const updateAssignment = async (itemId, newAssignee) => {
+                const item = items.find(i => i.id === itemId);
+                if (!item) return;
+
+                try {
+                    const { error } = await supabase
+                        .from('tracked_items')
+                        .update({ assigned_to: newAssignee })
+                        .eq('id', itemId);
+                    
+                    if (error) throw error;
+                    
+                    setItems(items.map(i => 
+                        i.id === itemId ? { ...i, assignedTo: newAssignee } : i
+                    ));
+                    
+                    await logActivity('assigned', itemId, item.title, {
+                        from: item.assignedTo,
+                        to: newAssignee
+                    });
+                } catch (err) {
+                    console.error('Error updating assignment:', err);
+                    setError('Failed to update assignment: ' + err.message);
+                }
+            };
+
+            const updatePriority = async (itemId, newPriority) => {
+                const item = items.find(i => i.id === itemId);
+                if (!item) return;
+
+                try {
+                    const { error } = await supabase
+                        .from('tracked_items')
+                        .update({ priority: newPriority })
+                        .eq('id', itemId);
+                    
+                    if (error) throw error;
+                    
+                    setItems(items.map(i => 
+                        i.id === itemId ? { ...i, priority: newPriority } : i
+                    ));
+                    
+                    await logActivity('priority_changed', itemId, item.title, {
+                        from: item.priority,
+                        to: newPriority
+                    });
+                } catch (err) {
+                    console.error('Error updating priority:', err);
+                    setError('Failed to update priority: ' + err.message);
+                }
+            };
+
+            const saveNote = async () => {
+                if (!editingNote) return;
+                
+                const item = items.find(i => i.id === editingNote);
+                
+                try {
+                    const { error } = await supabase
+                        .from('item_notes')
+                        .upsert({
+                            item_id: editingNote,
+                            note_text: noteText
+                        });
+                    
+                    if (error) throw error;
+                    
                     setItemNotes({...itemNotes, [editingNote]: noteText});
+                    
+                    await logActivity(
+                        itemNotes[editingNote] ? 'note_updated' : 'note_added',
+                        editingNote,
+                        item?.title || 'Unknown'
+                    );
+                    
                     setEditingNote(null);
                     setNoteText('');
+                } catch (err) {
+                    console.error('Error saving note:', err);
+                    setError('Failed to save note: ' + err.message);
                 }
             };
 
-            const deleteNote = (itemId) => {
-                const newNotes = {...itemNotes};
-                delete newNotes[itemId];
-                setItemNotes(newNotes);
+            const deleteNote = async (itemId) => {
+                const item = items.find(i => i.id === itemId);
+                
+                try {
+                    const { error } = await supabase
+                        .from('item_notes')
+                        .delete()
+                        .eq('item_id', itemId);
+                    
+                    if (error) throw error;
+                    
+                    const newNotes = {...itemNotes};
+                    delete newNotes[itemId];
+                    setItemNotes(newNotes);
+                    
+                    await logActivity('note_deleted', itemId, item?.title || 'Unknown');
+                } catch (err) {
+                    console.error('Error deleting note:', err);
+                    setError('Failed to delete note: ' + err.message);
+                }
             };
 
-            const addKeyword = () => {
-                if (newKeyword.trim() && !trackedKeywords.includes(newKeyword.toLowerCase())) {
+            const addKeyword = async () => {
+                if (!newKeyword.trim() || trackedKeywords.includes(newKeyword.toLowerCase())) {
+                    return;
+                }
+                
+                try {
+                    const { error } = await supabase
+                        .from('tracked_keywords')
+                        .insert({ keyword: newKeyword.toLowerCase() });
+                    
+                    if (error) throw error;
+                    
                     setTrackedKeywords([...trackedKeywords, newKeyword.toLowerCase()]);
                     setNewKeyword('');
                     setShowAddKeyword(false);
+                    
+                    await logActivity('keyword_added', null, null, { keyword: newKeyword.toLowerCase() });
+                } catch (err) {
+                    console.error('Error adding keyword:', err);
+                    setError('Failed to add keyword: ' + err.message);
                 }
             };
 
-            const removeKeyword = (keyword) => {
-                setTrackedKeywords(trackedKeywords.filter(k => k !== keyword));
+            const removeKeyword = async (keyword) => {
+                try {
+                    const { error } = await supabase
+                        .from('tracked_keywords')
+                        .delete()
+                        .eq('keyword', keyword);
+                    
+                    if (error) throw error;
+                    
+                    setTrackedKeywords(trackedKeywords.filter(k => k !== keyword));
+                    
+                    await logActivity('keyword_removed', null, null, { keyword });
+                } catch (err) {
+                    console.error('Error removing keyword:', err);
+                    setError('Failed to remove keyword: ' + err.message);
+                }
             };
 
-            const addManualEntry = () => {
+            const addManualEntry = async () => {
                 if (!manualEntry.title.trim()) {
                     alert('Please enter a title');
                     return;
@@ -233,6 +525,7 @@
                 const newItem = {
                     id: `MANUAL-${Date.now()}`,
                     title: manualEntry.title,
+                    billNumber: null,
                     agency: manualEntry.agency || 'DC Government',
                     category: 'Municipal Regulation',
                     status: manualEntry.status,
@@ -241,24 +534,63 @@
                     link: manualEntry.link,
                     source: 'Municipal Register',
                     isNew: isNewItem(manualEntry.date),
-                    committees: []
+                    committees: [],
+                    assignedTo: manualEntry.assignedTo,
+                    priority: manualEntry.priority
                 };
 
-                setItems([newItem, ...items]);
-                setShowManualEntry(false);
-                setManualEntry({
-                    title: '',
-                    agency: '',
-                    status: 'Published',
-                    date: new Date().toISOString().split('T')[0],
-                    link: ''
-                });
+                try {
+                    const { error } = await supabase
+                        .from('tracked_items')
+                        .insert({
+                            id: newItem.id,
+                            title: newItem.title,
+                            bill_number: null,
+                            category: newItem.category,
+                            status: newItem.status,
+                            committees: [],
+                            date: newItem.date,
+                            description: newItem.description,
+                            link: newItem.link,
+                            source: newItem.source,
+                            agency: newItem.agency,
+                            is_manual_entry: true,
+                            is_new: newItem.isNew,
+                            assigned_to: newItem.assignedTo,
+                            priority: newItem.priority
+                        });
+                    
+                    if (error) throw error;
+                    
+                    setItems([newItem, ...items]);
+                    const newSelected = new Set(selectedItems);
+                    newSelected.add(newItem.id);
+                    setSelectedItems(newSelected);
+                    
+                    await logActivity('manual_entry_added', newItem.id, newItem.title, {
+                        source: 'Municipal Register'
+                    });
+                    
+                    setShowManualEntry(false);
+                    setManualEntry({
+                        title: '',
+                        agency: '',
+                        status: 'Published',
+                        date: new Date().toISOString().split('T')[0],
+                        link: '',
+                        assignedTo: 'Unassigned',
+                        priority: 'medium'
+                    });
+                } catch (err) {
+                    console.error('Error adding manual entry:', err);
+                    setError('Failed to add manual entry: ' + err.message);
+                }
             };
 
             const exportToCSV = () => {
                 const itemsToExport = filteredItems;
 
-                const headers = ['Title', 'Bill Number', 'Category', 'Status', 'Committees', 'Date', 'Link', 'Notes', 'Action Required'];
+                const headers = ['Title', 'Bill Number', 'Category', 'Status', 'Committees', 'Date', 'Assigned To', 'Priority', 'Link', 'Notes', 'Action Required'];
                 const rows = itemsToExport.map(item => [
                     item.title,
                     item.billNumber || '',
@@ -266,6 +598,8 @@
                     item.status,
                     item.committees ? item.committees.join('; ') : '',
                     item.date,
+                    item.assignedTo || '',
+                    item.priority || '',
                     item.link || '',
                     itemNotes[item.id] || '',
                     selectedItems.has(item.id) ? 'Yes' : 'No'
@@ -294,11 +628,24 @@
                 const matchesCommittee = filters.committee === 'all' || 
                     (item.committees && item.committees.some(c => c === filters.committee));
                 const matchesCategory = filters.category === 'all' || item.category === filters.category;
-                return matchesKeyword && matchesCommittee && matchesCategory;
+                const matchesAssignedTo = filters.assignedTo === 'all' || item.assignedTo === filters.assignedTo;
+                const matchesPriority = filters.priority === 'all' || item.priority === filters.priority;
+                return matchesKeyword && matchesCommittee && matchesCategory && matchesAssignedTo && matchesPriority;
             });
 
             const categories = ['all', ...new Set(items.map(i => i.category).filter(Boolean))];
             const committees = ['all', ...new Set(items.filter(i => i.committees && i.committees.length > 0).flatMap(i => i.committees).filter(Boolean))];
+            const assignees = ['all', ...new Set(items.map(i => i.assignedTo).filter(Boolean))];
+            const priorities = ['all', 'high', 'medium', 'low'];
+
+            const getPriorityColor = (priority) => {
+                switch(priority) {
+                    case 'high': return 'bg-red-100 text-red-700';
+                    case 'medium': return 'bg-yellow-100 text-yellow-700';
+                    case 'low': return 'bg-green-100 text-green-700';
+                    default: return 'bg-gray-100 text-gray-700';
+                }
+            };
 
             return (
                 <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 p-6">
@@ -310,6 +657,15 @@
                                     <p className="text-gray-600">Legislative Monitoring System</p>
                                 </div>
                                 <div className="flex gap-2 flex-wrap">
+                                    <button
+                                        onClick={() => {
+                                            setShowActivityLog(true);
+                                            loadActivityLog();
+                                        }}
+                                        className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                                    >
+                                        📋 Activity Log
+                                    </button>
                                     <button
                                         onClick={() => setShowManualEntry(true)}
                                         className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
@@ -333,8 +689,9 @@
                             </div>
 
                             {error && (
-                                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 mb-4">
-                                    {error}
+                                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 mb-4 flex justify-between items-center">
+                                    <span>{error}</span>
+                                    <button onClick={() => setError(null)} className="text-red-700 hover:text-red-900">×</button>
                                 </div>
                             )}
 
@@ -410,6 +767,30 @@
                                                 ))}
                                             </select>
                                         </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-2">Assigned To</label>
+                                            <select
+                                                value={filters.assignedTo}
+                                                onChange={(e) => setFilters({...filters, assignedTo: e.target.value})}
+                                                className="w-full px-3 py-2 border rounded-lg"
+                                            >
+                                                {assignees.map(assignee => (
+                                                    <option key={assignee} value={assignee}>{assignee}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-2">Priority</label>
+                                            <select
+                                                value={filters.priority}
+                                                onChange={(e) => setFilters({...filters, priority: e.target.value})}
+                                                className="w-full px-3 py-2 border rounded-lg"
+                                            >
+                                                {priorities.map(priority => (
+                                                    <option key={priority} value={priority}>{priority}</option>
+                                                ))}
+                                            </select>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -428,7 +809,7 @@
 
                                     {!loading && filteredItems.length === 0 && (
                                         <div className="text-center py-12 text-gray-500">
-                                            Click Refresh to load legislation
+                                            {items.length === 0 ? 'Click Refresh to load legislation' : 'No items match your filters'}
                                         </div>
                                     )}
 
@@ -459,11 +840,16 @@
                                                                     ACTION REQUIRED
                                                                 </span>
                                                             )}
+                                                            {item.priority && (
+                                                                <span className={`px-2 py-0.5 text-xs font-bold rounded uppercase ${getPriorityColor(item.priority)}`}>
+                                                                    {item.priority}
+                                                                </span>
+                                                            )}
                                                             <h3 className="font-semibold">{item.title}</h3>
                                                         </div>
                                                         <div className="text-xs text-gray-500 mb-2">
                                                             <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">
-                                                                {item.billNumber}
+                                                                {item.billNumber || item.id}
                                                             </a>
                                                         </div>
                                                         <p className="text-sm text-gray-600 mb-2">{item.description}</p>
@@ -477,6 +863,37 @@
                                                                             {com}
                                                                         </span>
                                                                     ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {selectedItems.has(item.id) && (
+                                                            <div className="grid grid-cols-2 gap-2 mb-2">
+                                                                <div>
+                                                                    <label className="block text-xs font-semibold mb-1">Assigned To:</label>
+                                                                    <select
+                                                                        value={item.assignedTo || 'Unassigned'}
+                                                                        onChange={(e) => updateAssignment(item.id, e.target.value)}
+                                                                        className="w-full px-2 py-1 text-xs border rounded"
+                                                                    >
+                                                                        {teamMembers.map(member => (
+                                                                            <option key={member.id} value={member.name}>
+                                                                                {member.name}
+                                                                            </option>
+                                                                        ))}
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-xs font-semibold mb-1">Priority:</label>
+                                                                    <select
+                                                                        value={item.priority || 'medium'}
+                                                                        onChange={(e) => updatePriority(item.id, e.target.value)}
+                                                                        className="w-full px-2 py-1 text-xs border rounded"
+                                                                    >
+                                                                        <option value="high">High</option>
+                                                                        <option value="medium">Medium</option>
+                                                                        <option value="low">Low</option>
+                                                                    </select>
                                                                 </div>
                                                             </div>
                                                         )}
@@ -643,6 +1060,34 @@
                                             />
                                         </div>
                                     </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1">Assigned To</label>
+                                            <select
+                                                value={manualEntry.assignedTo}
+                                                onChange={(e) => setManualEntry({...manualEntry, assignedTo: e.target.value})}
+                                                className="w-full px-3 py-2 border rounded-lg"
+                                            >
+                                                {teamMembers.map(member => (
+                                                    <option key={member.id} value={member.name}>
+                                                        {member.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1">Priority</label>
+                                            <select
+                                                value={manualEntry.priority}
+                                                onChange={(e) => setManualEntry({...manualEntry, priority: e.target.value})}
+                                                className="w-full px-3 py-2 border rounded-lg"
+                                            >
+                                                <option value="high">High</option>
+                                                <option value="medium">Medium</option>
+                                                <option value="low">Low</option>
+                                            </select>
+                                        </div>
+                                    </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-1">Link (optional)</label>
                                         <input
@@ -669,13 +1114,56 @@
                                                 agency: '',
                                                 status: 'Published',
                                                 date: new Date().toISOString().split('T')[0],
-                                                link: ''
+                                                link: '',
+                                                assignedTo: 'Unassigned',
+                                                priority: 'medium'
                                             });
                                         }}
                                         className="flex-1 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
                                     >
                                         Cancel
                                     </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showActivityLog && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                            <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-screen overflow-y-auto">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-xl font-semibold">Activity Log</h3>
+                                    <button
+                                        onClick={() => setShowActivityLog(false)}
+                                        className="text-gray-500 hover:text-gray-700 text-2xl"
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                                <div className="space-y-2">
+                                    {activityLog.map((log) => (
+                                        <div key={log.id} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <span className="font-semibold text-sm">{log.action.replace(/_/g, ' ').toUpperCase()}</span>
+                                                    {log.item_title && <span className="text-sm text-gray-600 ml-2">- {log.item_title}</span>}
+                                                    {log.details && Object.keys(log.details).length > 0 && (
+                                                        <div className="text-xs text-gray-500 mt-1">
+                                                            {JSON.stringify(log.details)}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <span className="text-xs text-gray-400">
+                                                    {new Date(log.created_at).toLocaleString()}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {activityLog.length === 0 && (
+                                        <div className="text-center py-8 text-gray-500">
+                                            No activity recorded yet
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
