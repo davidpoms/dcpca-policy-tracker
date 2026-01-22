@@ -19,7 +19,7 @@
         // Initialize Supabase client
         // IMPORTANT: Replace these with your actual Supabase URL and anon key
         const SUPABASE_URL = 'https://owqylzpuxwsldepufxep.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_IWFsW7Fp1xUzKkr82yVavw_wu236ZdP'; // Get this from Supabase dashboard
+        const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY_HERE'; // Get this from Supabase dashboard
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         function DCPolicyTracker() {
@@ -29,22 +29,31 @@
                 committee: 'all',
                 category: 'all',
                 assignedTo: 'all',
-                priority: 'all'
+                priority: 'all',
+                actionStatus: 'all',
+                introducedBy: 'all'
             });
             const [selectedItems, setSelectedItems] = useState(new Set());
             const [itemNotes, setItemNotes] = useState({});
             const [trackedKeywords, setTrackedKeywords] = useState([]);
+            const [trackedCommittees, setTrackedCommittees] = useState([]);
+            const [trackedSponsors, setTrackedSponsors] = useState([]);
             const [teamMembers, setTeamMembers] = useState([]);
             const [councilPeriods, setCouncilPeriods] = useState([]);
             const [selectedPeriod, setSelectedPeriod] = useState(null);
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState(null);
             const [showAddKeyword, setShowAddKeyword] = useState(false);
+            const [showAddCommittee, setShowAddCommittee] = useState(false);
+            const [showAddSponsor, setShowAddSponsor] = useState(false);
             const [newKeyword, setNewKeyword] = useState('');
+            const [newCommittee, setNewCommittee] = useState('');
+            const [newSponsor, setNewSponsor] = useState('');
             const [editingNote, setEditingNote] = useState(null);
             const [noteText, setNoteText] = useState('');
             const [showManualEntry, setShowManualEntry] = useState(false);
             const [showActivityLog, setShowActivityLog] = useState(false);
+            const [showEmailPreview, setShowEmailPreview] = useState(false);
             const [activityLog, setActivityLog] = useState([]);
             const [manualEntry, setManualEntry] = useState({
                 title: '',
@@ -53,7 +62,8 @@
                 date: new Date().toISOString().split('T')[0],
                 link: '',
                 assignedTo: 'Unassigned',
-                priority: 'medium'
+                priority: 'medium',
+                actionStatus: 'action_needed'
             });
 
             const PROXY_URL = 'https://dcpca-policy-tracker.vercel.app/api/hello';
@@ -93,7 +103,9 @@
                             agency: item.agency,
                             isNew: item.is_new,
                             assignedTo: item.assigned_to,
-                            priority: item.priority
+                            priority: item.priority,
+                            actionStatus: item.action_status || 'action_needed',
+                            introducedBy: item.introduced_by
                         }));
                         setItems(displayItems);
                     }
@@ -123,6 +135,30 @@
                     
                     if (keywordsData) {
                         setTrackedKeywords(keywordsData.map(k => k.keyword));
+                    }
+
+                    // Load committees
+                    const { data: committeesData, error: committeesError } = await supabase
+                        .from('tracked_committees')
+                        .select('*')
+                        .order('added_at', { ascending: true });
+                    
+                    if (committeesError) throw committeesError;
+                    
+                    if (committeesData) {
+                        setTrackedCommittees(committeesData.map(c => c.committee_name));
+                    }
+
+                    // Load sponsors
+                    const { data: sponsorsData, error: sponsorsError } = await supabase
+                        .from('tracked_sponsors')
+                        .select('*')
+                        .order('added_at', { ascending: true });
+                    
+                    if (sponsorsError) throw sponsorsError;
+                    
+                    if (sponsorsData) {
+                        setTrackedSponsors(sponsorsData.map(s => s.sponsor_name));
                     }
 
                     // Load team members
@@ -218,7 +254,8 @@
                 setError(null);
                 
                 try {
-                    const searchPromises = trackedKeywords.map(keyword =>
+                    // Search by keywords
+                    const keywordPromises = trackedKeywords.map(keyword =>
                         proxyFetch('/SearchLegislation', 'POST', {
                             Keyword: keyword,
                             CategoryId: 0,
@@ -231,7 +268,35 @@
                         })
                     );
 
-                    const results = await Promise.all(searchPromises);
+                    // Search by committees
+                    const committeePromises = trackedCommittees.map(committee =>
+                        proxyFetch('/SearchLegislation', 'POST', {
+                            Keyword: committee,
+                            CategoryId: 0,
+                            CouncilPeriodId: selectedPeriod.councilPeriodId,
+                            RowLimit: 20,
+                            OffSet: 0
+                        }).catch(err => {
+                            console.error(`Error searching for committee "${committee}":`, err);
+                            return [];
+                        })
+                    );
+
+                    // Search by sponsors
+                    const sponsorPromises = trackedSponsors.map(sponsor =>
+                        proxyFetch('/SearchLegislation', 'POST', {
+                            Keyword: sponsor,
+                            CategoryId: 0,
+                            CouncilPeriodId: selectedPeriod.councilPeriodId,
+                            RowLimit: 20,
+                            OffSet: 0
+                        }).catch(err => {
+                            console.error(`Error searching for sponsor "${sponsor}":`, err);
+                            return [];
+                        })
+                    );
+
+                    const results = await Promise.all([...keywordPromises, ...committeePromises, ...sponsorPromises]);
                     
                     const allLegislation = [];
                     const seenIds = new Set();
@@ -255,6 +320,9 @@
                             committees = [committeeStr];
                         }
                         
+                        // Get introduced by information
+                        const introducedBy = leg.introducedBy || leg.primarySponsor || null;
+                        
                         return {
                             id: leg.legislationNumber,
                             title: leg.title,
@@ -264,15 +332,17 @@
                             committees: committees,
                             date: leg.introductionDate ? new Date(leg.introductionDate).toISOString().split('T')[0] : '',
                             description: leg.shortDescription || leg.title,
-                            link: leg.introductionDocumentURL || `https://lims.dccouncil.gov/Legislation/${leg.legislationNumber}`,
+                            link: `https://lims.dccouncil.gov/Legislation/${leg.legislationNumber}`,
                             source: 'DC Council',
                             isNew: isNewItem(leg.introductionDate),
                             assignedTo: null,
-                            priority: null
+                            priority: null,
+                            actionStatus: 'action_needed',
+                            introducedBy: introducedBy
                         };
                     });
 
-                    // Merge with existing tracked items (to preserve assignments and priorities)
+                    // Merge with existing tracked items (to preserve assignments, priorities, and action statuses)
                     const mergedItems = transformedItems.map(item => {
                         if (selectedItems.has(item.id)) {
                             const existing = items.find(i => i.id === item.id);
@@ -280,7 +350,8 @@
                                 return {
                                     ...item,
                                     assignedTo: existing.assignedTo,
-                                    priority: existing.priority
+                                    priority: existing.priority,
+                                    actionStatus: existing.actionStatus
                                 };
                             }
                         }
@@ -343,7 +414,9 @@
                                 is_manual_entry: item.source === 'Municipal Register',
                                 is_new: item.isNew,
                                 assigned_to: 'Unassigned',
-                                priority: 'medium'
+                                priority: 'medium',
+                                action_status: 'action_needed',
+                                introduced_by: item.introducedBy
                             });
                         
                         if (error) throw error;
@@ -352,10 +425,10 @@
                         newSelected.add(itemId);
                         setSelectedItems(newSelected);
                         
-                        // Update the item with default assignment and priority
+                        // Update the item with default values
                         setItems(items.map(i => 
                             i.id === itemId 
-                                ? { ...i, assignedTo: 'Unassigned', priority: 'medium' }
+                                ? { ...i, assignedTo: 'Unassigned', priority: 'medium', actionStatus: 'action_needed' }
                                 : i
                         ));
                         
@@ -419,6 +492,32 @@
                 } catch (err) {
                     console.error('Error updating priority:', err);
                     setError('Failed to update priority: ' + err.message);
+                }
+            };
+
+            const updateActionStatus = async (itemId, newStatus) => {
+                const item = items.find(i => i.id === itemId);
+                if (!item) return;
+
+                try {
+                    const { error } = await supabase
+                        .from('tracked_items')
+                        .update({ action_status: newStatus })
+                        .eq('id', itemId);
+                    
+                    if (error) throw error;
+                    
+                    setItems(items.map(i => 
+                        i.id === itemId ? { ...i, actionStatus: newStatus } : i
+                    ));
+                    
+                    await logActivity('action_status_changed', itemId, item.title, {
+                        from: item.actionStatus,
+                        to: newStatus
+                    });
+                } catch (err) {
+                    console.error('Error updating action status:', err);
+                    setError('Failed to update action status: ' + err.message);
                 }
             };
 
@@ -516,6 +615,88 @@
                 }
             };
 
+            const addCommittee = async () => {
+                if (!newCommittee.trim() || trackedCommittees.includes(newCommittee)) {
+                    return;
+                }
+                
+                try {
+                    const { error } = await supabase
+                        .from('tracked_committees')
+                        .insert({ committee_name: newCommittee });
+                    
+                    if (error) throw error;
+                    
+                    setTrackedCommittees([...trackedCommittees, newCommittee]);
+                    setNewCommittee('');
+                    setShowAddCommittee(false);
+                    
+                    await logActivity('committee_added', null, null, { committee: newCommittee });
+                } catch (err) {
+                    console.error('Error adding committee:', err);
+                    setError('Failed to add committee: ' + err.message);
+                }
+            };
+
+            const removeCommittee = async (committee) => {
+                try {
+                    const { error } = await supabase
+                        .from('tracked_committees')
+                        .delete()
+                        .eq('committee_name', committee);
+                    
+                    if (error) throw error;
+                    
+                    setTrackedCommittees(trackedCommittees.filter(c => c !== committee));
+                    
+                    await logActivity('committee_removed', null, null, { committee });
+                } catch (err) {
+                    console.error('Error removing committee:', err);
+                    setError('Failed to remove committee: ' + err.message);
+                }
+            };
+
+            const addSponsor = async () => {
+                if (!newSponsor.trim() || trackedSponsors.includes(newSponsor)) {
+                    return;
+                }
+                
+                try {
+                    const { error } = await supabase
+                        .from('tracked_sponsors')
+                        .insert({ sponsor_name: newSponsor });
+                    
+                    if (error) throw error;
+                    
+                    setTrackedSponsors([...trackedSponsors, newSponsor]);
+                    setNewSponsor('');
+                    setShowAddSponsor(false);
+                    
+                    await logActivity('sponsor_added', null, null, { sponsor: newSponsor });
+                } catch (err) {
+                    console.error('Error adding sponsor:', err);
+                    setError('Failed to add sponsor: ' + err.message);
+                }
+            };
+
+            const removeSponsor = async (sponsor) => {
+                try {
+                    const { error } = await supabase
+                        .from('tracked_sponsors')
+                        .delete()
+                        .eq('sponsor_name', sponsor);
+                    
+                    if (error) throw error;
+                    
+                    setTrackedSponsors(trackedSponsors.filter(s => s !== sponsor));
+                    
+                    await logActivity('sponsor_removed', null, null, { sponsor });
+                } catch (err) {
+                    console.error('Error removing sponsor:', err);
+                    setError('Failed to remove sponsor: ' + err.message);
+                }
+            };
+
             const addManualEntry = async () => {
                 if (!manualEntry.title.trim()) {
                     alert('Please enter a title');
@@ -536,7 +717,9 @@
                     isNew: isNewItem(manualEntry.date),
                     committees: [],
                     assignedTo: manualEntry.assignedTo,
-                    priority: manualEntry.priority
+                    priority: manualEntry.priority,
+                    actionStatus: manualEntry.actionStatus,
+                    introducedBy: null
                 };
 
                 try {
@@ -557,7 +740,9 @@
                             is_manual_entry: true,
                             is_new: newItem.isNew,
                             assigned_to: newItem.assignedTo,
-                            priority: newItem.priority
+                            priority: newItem.priority,
+                            action_status: newItem.actionStatus,
+                            introduced_by: null
                         });
                     
                     if (error) throw error;
@@ -579,7 +764,8 @@
                         date: new Date().toISOString().split('T')[0],
                         link: '',
                         assignedTo: 'Unassigned',
-                        priority: 'medium'
+                        priority: 'medium',
+                        actionStatus: 'action_needed'
                     });
                 } catch (err) {
                     console.error('Error adding manual entry:', err);
@@ -587,10 +773,74 @@
                 }
             };
 
+            const generateEmailBody = () => {
+                const completedItems = filteredItems.filter(item => 
+                    selectedItems.has(item.id) && 
+                    (item.actionStatus === 'action_completed' || item.actionStatus === 'monitor_and_assess')
+                );
+
+                const actionCompleted = completedItems.filter(item => item.actionStatus === 'action_completed');
+                const monitorAndAssess = completedItems.filter(item => item.actionStatus === 'monitor_and_assess');
+
+                let emailBody = `DC Policy Tracker - Status Update\n`;
+                emailBody += `Generated: ${new Date().toLocaleDateString()}\n\n`;
+                emailBody += `=================================================\n\n`;
+
+                if (actionCompleted.length > 0) {
+                    emailBody += `ACTION COMPLETED (${actionCompleted.length} items)\n`;
+                    emailBody += `=================================================\n\n`;
+                    actionCompleted.forEach((item, idx) => {
+                        emailBody += `${idx + 1}. ${item.title}\n`;
+                        emailBody += `   Bill Number: ${item.billNumber || 'N/A'}\n`;
+                        emailBody += `   Category: ${item.category}\n`;
+                        emailBody += `   Status: ${item.status}\n`;
+                        emailBody += `   Assigned To: ${item.assignedTo || 'Unassigned'}\n`;
+                        emailBody += `   Priority: ${item.priority || 'N/A'}\n`;
+                        if (item.introducedBy) emailBody += `   Introduced By: ${item.introducedBy}\n`;
+                        if (itemNotes[item.id]) emailBody += `   Notes: ${itemNotes[item.id]}\n`;
+                        emailBody += `   Link: ${item.link}\n`;
+                        emailBody += `\n`;
+                    });
+                }
+
+                if (monitorAndAssess.length > 0) {
+                    emailBody += `\nMONITOR AND ASSESS (${monitorAndAssess.length} items)\n`;
+                    emailBody += `=================================================\n\n`;
+                    monitorAndAssess.forEach((item, idx) => {
+                        emailBody += `${idx + 1}. ${item.title}\n`;
+                        emailBody += `   Bill Number: ${item.billNumber || 'N/A'}\n`;
+                        emailBody += `   Category: ${item.category}\n`;
+                        emailBody += `   Status: ${item.status}\n`;
+                        emailBody += `   Assigned To: ${item.assignedTo || 'Unassigned'}\n`;
+                        emailBody += `   Priority: ${item.priority || 'N/A'}\n`;
+                        if (item.introducedBy) emailBody += `   Introduced By: ${item.introducedBy}\n`;
+                        if (itemNotes[item.id]) emailBody += `   Notes: ${itemNotes[item.id]}\n`;
+                        emailBody += `   Link: ${item.link}\n`;
+                        emailBody += `\n`;
+                    });
+                }
+
+                if (completedItems.length === 0) {
+                    emailBody += `No items with "Action Completed" or "Monitor and Assess" status.\n`;
+                }
+
+                return emailBody;
+            };
+
+            const copyEmailToClipboard = () => {
+                const emailBody = generateEmailBody();
+                navigator.clipboard.writeText(emailBody).then(() => {
+                    alert('Email content copied to clipboard!');
+                }).catch(err => {
+                    console.error('Failed to copy:', err);
+                    alert('Failed to copy to clipboard');
+                });
+            };
+
             const exportToCSV = () => {
                 const itemsToExport = filteredItems;
 
-                const headers = ['Title', 'Bill Number', 'Category', 'Status', 'Committees', 'Date', 'Assigned To', 'Priority', 'Link', 'Notes', 'Action Required'];
+                const headers = ['Title', 'Bill Number', 'Category', 'Status', 'Committees', 'Date', 'Assigned To', 'Priority', 'Action Status', 'Introduced By', 'Link', 'Notes', 'Tracked'];
                 const rows = itemsToExport.map(item => [
                     item.title,
                     item.billNumber || '',
@@ -600,6 +850,8 @@
                     item.date,
                     item.assignedTo || '',
                     item.priority || '',
+                    item.actionStatus || '',
+                    item.introducedBy || '',
                     item.link || '',
                     itemNotes[item.id] || '',
                     selectedItems.has(item.id) ? 'Yes' : 'No'
@@ -630,13 +882,17 @@
                 const matchesCategory = filters.category === 'all' || item.category === filters.category;
                 const matchesAssignedTo = filters.assignedTo === 'all' || item.assignedTo === filters.assignedTo;
                 const matchesPriority = filters.priority === 'all' || item.priority === filters.priority;
-                return matchesKeyword && matchesCommittee && matchesCategory && matchesAssignedTo && matchesPriority;
+                const matchesActionStatus = filters.actionStatus === 'all' || item.actionStatus === filters.actionStatus;
+                const matchesIntroducedBy = filters.introducedBy === 'all' || item.introducedBy === filters.introducedBy;
+                return matchesKeyword && matchesCommittee && matchesCategory && matchesAssignedTo && matchesPriority && matchesActionStatus && matchesIntroducedBy;
             });
 
             const categories = ['all', ...new Set(items.map(i => i.category).filter(Boolean))];
             const committees = ['all', ...new Set(items.filter(i => i.committees && i.committees.length > 0).flatMap(i => i.committees).filter(Boolean))];
             const assignees = ['all', ...new Set(items.map(i => i.assignedTo).filter(Boolean))];
             const priorities = ['all', 'high', 'medium', 'low'];
+            const actionStatuses = ['all', 'action_needed', 'action_completed', 'monitor_and_assess'];
+            const introducers = ['all', ...new Set(items.map(i => i.introducedBy).filter(Boolean))];
 
             const getPriorityColor = (priority) => {
                 switch(priority) {
@@ -644,6 +900,24 @@
                     case 'medium': return 'bg-yellow-100 text-yellow-700';
                     case 'low': return 'bg-green-100 text-green-700';
                     default: return 'bg-gray-100 text-gray-700';
+                }
+            };
+
+            const getActionStatusColor = (status) => {
+                switch(status) {
+                    case 'action_needed': return 'bg-red-100 text-red-700';
+                    case 'action_completed': return 'bg-green-100 text-green-700';
+                    case 'monitor_and_assess': return 'bg-blue-100 text-blue-700';
+                    default: return 'bg-gray-100 text-gray-700';
+                }
+            };
+
+            const getActionStatusLabel = (status) => {
+                switch(status) {
+                    case 'action_needed': return 'ACTION NEEDED';
+                    case 'action_completed': return 'ACTION COMPLETED';
+                    case 'monitor_and_assess': return 'MONITOR & ASSESS';
+                    default: return status;
                 }
             };
 
@@ -657,6 +931,12 @@
                                     <p className="text-gray-600">Legislative Monitoring System</p>
                                 </div>
                                 <div className="flex gap-2 flex-wrap">
+                                    <button
+                                        onClick={() => setShowEmailPreview(true)}
+                                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                    >
+                                        📧 Generate Email
+                                    </button>
                                     <button
                                         onClick={() => {
                                             setShowActivityLog(true);
@@ -698,7 +978,7 @@
                             {selectedPeriod && (
                                 <div className="text-sm text-gray-600">
                                     Council Period: <strong>{selectedPeriod.councilPeriod}</strong>
-                                    {selectedItems.size > 0 && <span className="ml-2 px-2 py-1 bg-indigo-100 text-indigo-700 rounded">{selectedItems.size} items need action</span>}
+                                    {selectedItems.size > 0 && <span className="ml-2 px-2 py-1 bg-indigo-100 text-indigo-700 rounded">{selectedItems.size} items tracked</span>}
                                 </div>
                             )}
                         </div>
@@ -721,6 +1001,56 @@
                                                 <span className="capitalize">{keyword}</span>
                                                 <button
                                                     onClick={() => removeKeyword(keyword)}
+                                                    className="text-red-600 hover:text-red-800"
+                                                >
+                                                    ×
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-lg shadow-lg p-6">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h2 className="text-xl font-semibold">Tracked Committees</h2>
+                                        <button
+                                            onClick={() => setShowAddCommittee(true)}
+                                            className="text-indigo-600 hover:text-indigo-800"
+                                        >
+                                            + Add
+                                        </button>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {trackedCommittees.map(committee => (
+                                            <div key={committee} className="flex items-center justify-between p-2 bg-blue-50 rounded">
+                                                <span className="text-sm">{committee}</span>
+                                                <button
+                                                    onClick={() => removeCommittee(committee)}
+                                                    className="text-red-600 hover:text-red-800"
+                                                >
+                                                    ×
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-lg shadow-lg p-6">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h2 className="text-xl font-semibold">Tracked Sponsors</h2>
+                                        <button
+                                            onClick={() => setShowAddSponsor(true)}
+                                            className="text-indigo-600 hover:text-indigo-800"
+                                        >
+                                            + Add
+                                        </button>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {trackedSponsors.map(sponsor => (
+                                            <div key={sponsor} className="flex items-center justify-between p-2 bg-purple-50 rounded">
+                                                <span className="text-sm">{sponsor}</span>
+                                                <button
+                                                    onClick={() => removeSponsor(sponsor)}
                                                     className="text-red-600 hover:text-red-800"
                                                 >
                                                     ×
@@ -768,6 +1098,18 @@
                                             </select>
                                         </div>
                                         <div>
+                                            <label className="block text-sm font-medium mb-2">Introduced By</label>
+                                            <select
+                                                value={filters.introducedBy}
+                                                onChange={(e) => setFilters({...filters, introducedBy: e.target.value})}
+                                                className="w-full px-3 py-2 border rounded-lg"
+                                            >
+                                                {introducers.map(intro => (
+                                                    <option key={intro} value={intro}>{intro}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
                                             <label className="block text-sm font-medium mb-2">Assigned To</label>
                                             <select
                                                 value={filters.assignedTo}
@@ -788,6 +1130,20 @@
                                             >
                                                 {priorities.map(priority => (
                                                     <option key={priority} value={priority}>{priority}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-2">Action Status</label>
+                                            <select
+                                                value={filters.actionStatus}
+                                                onChange={(e) => setFilters({...filters, actionStatus: e.target.value})}
+                                                className="w-full px-3 py-2 border rounded-lg"
+                                            >
+                                                {actionStatuses.map(status => (
+                                                    <option key={status} value={status}>
+                                                        {status === 'all' ? 'all' : getActionStatusLabel(status)}
+                                                    </option>
                                                 ))}
                                             </select>
                                         </div>
@@ -836,8 +1192,8 @@
                                                                 </span>
                                                             )}
                                                             {selectedItems.has(item.id) && (
-                                                                <span className="px-2 py-0.5 bg-indigo-500 text-white text-xs font-bold rounded">
-                                                                    ACTION REQUIRED
+                                                                <span className={`px-2 py-0.5 text-xs font-bold rounded ${getActionStatusColor(item.actionStatus)}`}>
+                                                                    {getActionStatusLabel(item.actionStatus)}
                                                                 </span>
                                                             )}
                                                             {item.priority && (
@@ -851,6 +1207,9 @@
                                                             <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">
                                                                 {item.billNumber || item.id}
                                                             </a>
+                                                            {item.introducedBy && (
+                                                                <span className="ml-2">• Introduced by: {item.introducedBy}</span>
+                                                            )}
                                                         </div>
                                                         <p className="text-sm text-gray-600 mb-2">{item.description}</p>
 
@@ -868,7 +1227,7 @@
                                                         )}
 
                                                         {selectedItems.has(item.id) && (
-                                                            <div className="grid grid-cols-2 gap-2 mb-2">
+                                                            <div className="grid grid-cols-3 gap-2 mb-2">
                                                                 <div>
                                                                     <label className="block text-xs font-semibold mb-1">Assigned To:</label>
                                                                     <select
@@ -893,6 +1252,18 @@
                                                                         <option value="high">High</option>
                                                                         <option value="medium">Medium</option>
                                                                         <option value="low">Low</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-xs font-semibold mb-1">Action Status:</label>
+                                                                    <select
+                                                                        value={item.actionStatus || 'action_needed'}
+                                                                        onChange={(e) => updateActionStatus(item.id, e.target.value)}
+                                                                        className="w-full px-2 py-1 text-xs border rounded"
+                                                                    >
+                                                                        <option value="action_needed">Action Needed</option>
+                                                                        <option value="action_completed">Action Completed</option>
+                                                                        <option value="monitor_and_assess">Monitor & Assess</option>
                                                                     </select>
                                                                 </div>
                                                             </div>
@@ -965,6 +1336,74 @@
                                         onClick={() => {
                                             setShowAddKeyword(false);
                                             setNewKeyword('');
+                                        }}
+                                        className="flex-1 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showAddCommittee && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                            <div className="bg-white rounded-lg p-6 max-w-md w-full">
+                                <h3 className="text-xl font-semibold mb-4">Add Committee</h3>
+                                <input
+                                    type="text"
+                                    value={newCommittee}
+                                    onChange={(e) => setNewCommittee(e.target.value)}
+                                    onKeyPress={(e) => e.key === 'Enter' && addCommittee()}
+                                    placeholder="e.g., Committee on Housing"
+                                    className="w-full px-3 py-2 border rounded-lg mb-4"
+                                    autoFocus
+                                />
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={addCommittee}
+                                        className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                                    >
+                                        Add
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setShowAddCommittee(false);
+                                            setNewCommittee('');
+                                        }}
+                                        className="flex-1 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showAddSponsor && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                            <div className="bg-white rounded-lg p-6 max-w-md w-full">
+                                <h3 className="text-xl font-semibold mb-4">Add Sponsor</h3>
+                                <input
+                                    type="text"
+                                    value={newSponsor}
+                                    onChange={(e) => setNewSponsor(e.target.value)}
+                                    onKeyPress={(e) => e.key === 'Enter' && addSponsor()}
+                                    placeholder="e.g., Councilmember Name"
+                                    className="w-full px-3 py-2 border rounded-lg mb-4"
+                                    autoFocus
+                                />
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={addSponsor}
+                                        className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                                    >
+                                        Add
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setShowAddSponsor(false);
+                                            setNewSponsor('');
                                         }}
                                         className="flex-1 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
                                     >
@@ -1060,7 +1499,7 @@
                                             />
                                         </div>
                                     </div>
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-3 gap-4">
                                         <div>
                                             <label className="block text-sm font-medium mb-1">Assigned To</label>
                                             <select
@@ -1085,6 +1524,18 @@
                                                 <option value="high">High</option>
                                                 <option value="medium">Medium</option>
                                                 <option value="low">Low</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1">Action Status</label>
+                                            <select
+                                                value={manualEntry.actionStatus}
+                                                onChange={(e) => setManualEntry({...manualEntry, actionStatus: e.target.value})}
+                                                className="w-full px-3 py-2 border rounded-lg"
+                                            >
+                                                <option value="action_needed">Action Needed</option>
+                                                <option value="action_completed">Action Completed</option>
+                                                <option value="monitor_and_assess">Monitor & Assess</option>
                                             </select>
                                         </div>
                                     </div>
@@ -1116,7 +1567,8 @@
                                                 date: new Date().toISOString().split('T')[0],
                                                 link: '',
                                                 assignedTo: 'Unassigned',
-                                                priority: 'medium'
+                                                priority: 'medium',
+                                                actionStatus: 'action_needed'
                                             });
                                         }}
                                         className="flex-1 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
@@ -1164,6 +1616,39 @@
                                             No activity recorded yet
                                         </div>
                                     )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showEmailPreview && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                            <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-screen overflow-y-auto">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-xl font-semibold">Email Preview</h3>
+                                    <button
+                                        onClick={() => setShowEmailPreview(false)}
+                                        className="text-gray-500 hover:text-gray-700 text-2xl"
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                                <pre className="bg-gray-50 p-4 rounded-lg border border-gray-200 text-sm whitespace-pre-wrap font-mono mb-4">
+                                    {generateEmailBody()}
+                                </pre>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={copyEmailToClipboard}
+                                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                    >
+                                        Copy to Clipboard
+                                    </button>
+                                    <button
+                                        onClick={() => setShowEmailPreview(false)}
+                                        className="flex-1 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
+                                    >
+                                        Close
+                                    </button>
                                 </div>
                             </div>
                         </div>
