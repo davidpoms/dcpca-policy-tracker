@@ -19,7 +19,7 @@
         // Initialize Supabase client
         // IMPORTANT: Replace these with your actual Supabase URL and anon key
         const SUPABASE_URL = 'https://owqylzpuxwsldepufxep.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_IWFsW7Fp1xUzKkr82yVavw_wu236ZdP'; // Get this from Supabase dashboard
+        const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY_HERE'; // Get this from Supabase dashboard
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         function DCPolicyTracker() {
@@ -88,7 +88,7 @@
                         const itemsSet = new Set(trackedData.map(item => item.id));
                         setSelectedItems(itemsSet);
                         
-                        // Convert tracked items to display format
+                        // Convert tracked items to display format and SET THEM AS ITEMS immediately
                         const displayItems = trackedData.map(item => ({
                             id: item.id,
                             title: item.title,
@@ -107,6 +107,8 @@
                             actionStatus: item.action_status || 'action_needed',
                             introducedBy: item.introduced_by
                         }));
+                        
+                        // IMMEDIATELY show tracked items (this is the key change!)
                         setItems(displayItems);
                     }
 
@@ -368,6 +370,12 @@
                     });
 
                     // Merge with existing tracked items (to preserve assignments, priorities, and action statuses)
+                    // AND keep any tracked items that weren't in the API results
+                    const existingTrackedItems = items.filter(item => 
+                        selectedItems.has(item.id) && 
+                        !allLegislation.some(leg => leg.legislationNumber === item.id)
+                    );
+                    
                     const mergedItems = transformedItems.map(item => {
                         if (selectedItems.has(item.id)) {
                             const existing = items.find(i => i.id === item.id);
@@ -383,7 +391,8 @@
                         return item;
                     });
 
-                    setItems(mergedItems);
+                    // Combine: existing tracked items that weren't in API + new API results
+                    setItems([...existingTrackedItems, ...mergedItems]);
                     setLoading(false);
                 } catch (err) {
                     console.error('Error in refreshData:', err);
@@ -1222,7 +1231,7 @@
 
                                     {!loading && filteredItems.length === 0 && (
                                         <div className="text-center py-12 text-gray-500">
-                                            {items.length === 0 ? 'Click Refresh to load legislation' : 'No items match your filters'}
+                                            {items.length === 0 ? 'No tracked items yet. Click Refresh to search for legislation.' : 'No items match your filters'}
                                         </div>
                                     )}
 
