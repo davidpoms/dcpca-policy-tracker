@@ -19,7 +19,7 @@
         // Initialize Supabase client
         // IMPORTANT: Replace these with your actual Supabase URL and anon key
         const SUPABASE_URL = 'https://owqylzpuxwsldepufxep.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_IWFsW7Fp1xUzKkr82yVavw_wu236ZdP'; // Get this from Supabase dashboard
+        const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY_HERE'; // Get this from Supabase dashboard
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         function DCPolicyTracker() {
@@ -254,7 +254,7 @@
                 setError(null);
                 
                 try {
-                    // Search by keywords
+                    // Search by keywords (no filtering needed - these search title/description)
                     const keywordPromises = trackedKeywords.map(keyword =>
                         proxyFetch('/SearchLegislation', 'POST', {
                             Keyword: keyword,
@@ -268,33 +268,58 @@
                         })
                     );
 
-                    // Search by committees
-                    const committeePromises = trackedCommittees.map(committee =>
-                        proxyFetch('/SearchLegislation', 'POST', {
-                            Keyword: committee,
-                            CategoryId: 0,
-                            CouncilPeriodId: selectedPeriod.councilPeriodId,
-                            RowLimit: 20,
-                            OffSet: 0
-                        }).catch(err => {
+                    // Search by committees - will filter results to only keep items with matching committee
+                    const committeePromises = trackedCommittees.map(async committee => {
+                        try {
+                            const results = await proxyFetch('/SearchLegislation', 'POST', {
+                                Keyword: committee,
+                                CategoryId: 0,
+                                CouncilPeriodId: selectedPeriod.councilPeriodId,
+                                RowLimit: 50, // Get more results to filter through
+                                OffSet: 0
+                            });
+                            
+                            // Filter to only include items where the committee actually matches
+                            const filtered = Array.isArray(results) ? results.filter(leg => {
+                                const committeeStr = leg.referredToCommittees;
+                                if (!committeeStr || committeeStr === 'null') return false;
+                                // Check if the committee name is in the referredToCommittees field
+                                return committeeStr.toLowerCase().includes(committee.toLowerCase());
+                            }) : [];
+                            
+                            return filtered;
+                        } catch (err) {
                             console.error(`Error searching for committee "${committee}":`, err);
                             return [];
-                        })
-                    );
+                        }
+                    });
 
-                    // Search by sponsors
-                    const sponsorPromises = trackedSponsors.map(sponsor =>
-                        proxyFetch('/SearchLegislation', 'POST', {
-                            Keyword: sponsor,
-                            CategoryId: 0,
-                            CouncilPeriodId: selectedPeriod.councilPeriodId,
-                            RowLimit: 20,
-                            OffSet: 0
-                        }).catch(err => {
+                    // Search by sponsors - will filter results to only keep items with matching sponsor
+                    const sponsorPromises = trackedSponsors.map(async sponsor => {
+                        try {
+                            const results = await proxyFetch('/SearchLegislation', 'POST', {
+                                Keyword: sponsor,
+                                CategoryId: 0,
+                                CouncilPeriodId: selectedPeriod.councilPeriodId,
+                                RowLimit: 50, // Get more results to filter through
+                                OffSet: 0
+                            });
+                            
+                            // Filter to only include items where the sponsor actually matches
+                            const filtered = Array.isArray(results) ? results.filter(leg => {
+                                const introducedBy = leg.introducedBy || leg.primarySponsor || '';
+                                const coIntroducers = leg.coIntroducers || '';
+                                // Check if sponsor name appears in any sponsor field
+                                const sponsorText = `${introducedBy} ${coIntroducers}`.toLowerCase();
+                                return sponsorText.includes(sponsor.toLowerCase());
+                            }) : [];
+                            
+                            return filtered;
+                        } catch (err) {
                             console.error(`Error searching for sponsor "${sponsor}":`, err);
                             return [];
-                        })
-                    );
+                        }
+                    });
 
                     const results = await Promise.all([...keywordPromises, ...committeePromises, ...sponsorPromises]);
                     
@@ -328,6 +353,19 @@
                             title: leg.title,
                             billNumber: leg.legislationNumber,
                             category: leg.category || leg.subCategory || 'Uncategorized',
+                            status: leg.status || 'Unknown',
+                            committees: committees,
+                            date: leg.introductionDate ? new Date(leg.introductionDate).toISOString().split('T')[0] : '',
+                            description: leg.shortDescription || leg.title,
+                            link: `https://lims.dccouncil.gov/Legislation/${leg.legislationNumber}`,
+                            source: 'DC Council',
+                            isNew: isNewItem(leg.introductionDate),
+                            assignedTo: null,
+                            priority: null,
+                            actionStatus: 'action_needed',
+                            introducedBy: introducedBy
+                        };
+                    });
                             status: leg.status || 'Unknown',
                             committees: committees,
                             date: leg.introductionDate ? new Date(leg.introductionDate).toISOString().split('T')[0] : '',
@@ -1382,12 +1420,15 @@
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
                             <div className="bg-white rounded-lg p-6 max-w-md w-full">
                                 <h3 className="text-xl font-semibold mb-4">Add Committee</h3>
+                                <p className="text-sm text-gray-600 mb-3">
+                                    Enter the committee name. Try partial names like "Housing" or "Transportation"
+                                </p>
                                 <input
                                     type="text"
                                     value={newCommittee}
                                     onChange={(e) => setNewCommittee(e.target.value)}
                                     onKeyPress={(e) => e.key === 'Enter' && addCommittee()}
-                                    placeholder="e.g., Committee on Housing"
+                                    placeholder="e.g., Housing, Transportation, Judiciary"
                                     className="w-full px-3 py-2 border rounded-lg mb-4"
                                     autoFocus
                                 />
@@ -1416,12 +1457,15 @@
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
                             <div className="bg-white rounded-lg p-6 max-w-md w-full">
                                 <h3 className="text-xl font-semibold mb-4">Add Sponsor</h3>
+                                <p className="text-sm text-gray-600 mb-3">
+                                    Enter the councilmember's last name or full name
+                                </p>
                                 <input
                                     type="text"
                                     value={newSponsor}
                                     onChange={(e) => setNewSponsor(e.target.value)}
                                     onKeyPress={(e) => e.key === 'Enter' && addSponsor()}
-                                    placeholder="e.g., Councilmember Name"
+                                    placeholder="e.g., Allen, Nadeau, McDuffie"
                                     className="w-full px-3 py-2 border rounded-lg mb-4"
                                     autoFocus
                                 />
