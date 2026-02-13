@@ -19,7 +19,7 @@
         // Initialize Supabase client
         // IMPORTANT: Replace these with your actual Supabase URL and anon key
         const SUPABASE_URL = 'https://owqylzpuxwsldepufxep.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_IWFsW7Fp1xUzKkr82yVavw_wu236ZdP'; // Get this from Supabase dashboard
+        const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY_HERE'; // Get this from Supabase dashboard
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         function DCPolicyTracker() {
@@ -38,6 +38,7 @@
             const [trackedKeywords, setTrackedKeywords] = useState([]);
             const [trackedCommittees, setTrackedCommittees] = useState([]);
             const [trackedSponsors, setTrackedSponsors] = useState([]);
+            const [searchMode, setSearchMode] = useState('all'); // 'all', 'keywords', 'committees', 'sponsors'
             const [teamMembers, setTeamMembers] = useState([]);
             const [councilPeriods, setCouncilPeriods] = useState([]);
             const [selectedPeriod, setSelectedPeriod] = useState(null);
@@ -260,74 +261,85 @@
                 setError(null);
                 
                 try {
-                    // Search by keywords (no filtering needed - these search title/description)
-                    const keywordPromises = trackedKeywords.map(keyword =>
-                        proxyFetch('/SearchLegislation', 'POST', {
-                            Keyword: keyword,
-                            CategoryId: 0,
-                            CouncilPeriodId: selectedPeriod.councilPeriodId,
-                            RowLimit: 20,
-                            OffSet: 0
-                        }).catch(err => {
-                            console.error(`Error searching for "${keyword}":`, err);
-                            return [];
-                        })
-                    );
-
-                    // Search by committees - will filter results to only keep items with matching committee
-                    const committeePromises = trackedCommittees.map(async committee => {
-                        try {
-                            const results = await proxyFetch('/SearchLegislation', 'POST', {
-                                Keyword: committee,
+                    let allPromises = [];
+                    
+                    // Search by keywords (only if search mode allows)
+                    if ((searchMode === 'all' || searchMode === 'keywords') && trackedKeywords.length > 0) {
+                        const keywordPromises = trackedKeywords.map(keyword =>
+                            proxyFetch('/SearchLegislation', 'POST', {
+                                Keyword: keyword,
                                 CategoryId: 0,
                                 CouncilPeriodId: selectedPeriod.councilPeriodId,
-                                RowLimit: 50, // Get more results to filter through
+                                RowLimit: 20,
                                 OffSet: 0
-                            });
-                            
-                            // Filter to only include items where the committee actually matches
-                            const filtered = Array.isArray(results) ? results.filter(leg => {
-                                const committeeStr = leg.referredToCommittees;
-                                if (!committeeStr || committeeStr === 'null') return false;
-                                // Check if the committee name is in the referredToCommittees field
-                                return committeeStr.toLowerCase().includes(committee.toLowerCase());
-                            }) : [];
-                            
-                            return filtered;
-                        } catch (err) {
-                            console.error(`Error searching for committee "${committee}":`, err);
-                            return [];
-                        }
-                    });
+                            }).catch(err => {
+                                console.error(`Error searching for "${keyword}":`, err);
+                                return [];
+                            })
+                        );
+                        allPromises.push(...keywordPromises);
+                    }
 
-                    // Search by sponsors - will filter results to only keep items with matching sponsor
-                    const sponsorPromises = trackedSponsors.map(async sponsor => {
-                        try {
-                            const results = await proxyFetch('/SearchLegislation', 'POST', {
-                                Keyword: sponsor,
-                                CategoryId: 0,
-                                CouncilPeriodId: selectedPeriod.councilPeriodId,
-                                RowLimit: 50, // Get more results to filter through
-                                OffSet: 0
-                            });
-                            
-                            // Filter to only include items where the sponsor actually matches
-                            const filtered = Array.isArray(results) ? results.filter(leg => {
-                                const introducedBy = leg.introducedBy || leg.primarySponsor || '';
-                                const coIntroducers = leg.coIntroducers || '';
-                                // Check if sponsor name appears in any sponsor field
-                                const sponsorText = `${introducedBy} ${coIntroducers}`.toLowerCase();
-                                return sponsorText.includes(sponsor.toLowerCase());
-                            }) : [];
-                            
-                            return filtered;
-                        } catch (err) {
-                            console.error(`Error searching for sponsor "${sponsor}":`, err);
-                            return [];
-                        }
-                    });
+                    // Search by committees (only if search mode allows)
+                    if ((searchMode === 'all' || searchMode === 'committees') && trackedCommittees.length > 0) {
+                        const committeePromises = trackedCommittees.map(async committee => {
+                            try {
+                                const results = await proxyFetch('/SearchLegislation', 'POST', {
+                                    Keyword: committee,
+                                    CategoryId: 0,
+                                    CouncilPeriodId: selectedPeriod.councilPeriodId,
+                                    RowLimit: 50, // Get more results to filter through
+                                    OffSet: 0
+                                });
+                                
+                                // Filter to only include items where the committee actually matches
+                                const filtered = Array.isArray(results) ? results.filter(leg => {
+                                    const committeeStr = leg.referredToCommittees;
+                                    if (!committeeStr || committeeStr === 'null') return false;
+                                    // Check if the committee name is in the referredToCommittees field
+                                    return committeeStr.toLowerCase().includes(committee.toLowerCase());
+                                }) : [];
+                                
+                                return filtered;
+                            } catch (err) {
+                                console.error(`Error searching for committee "${committee}":`, err);
+                                return [];
+                            }
+                        });
+                        allPromises.push(...committeePromises);
+                    }
 
-                    const results = await Promise.all([...keywordPromises, ...committeePromises, ...sponsorPromises]);
+                    // Search by sponsors (only if search mode allows)
+                    if ((searchMode === 'all' || searchMode === 'sponsors') && trackedSponsors.length > 0) {
+                        const sponsorPromises = trackedSponsors.map(async sponsor => {
+                            try {
+                                const results = await proxyFetch('/SearchLegislation', 'POST', {
+                                    Keyword: sponsor,
+                                    CategoryId: 0,
+                                    CouncilPeriodId: selectedPeriod.councilPeriodId,
+                                    RowLimit: 50, // Get more results to filter through
+                                    OffSet: 0
+                                });
+                                
+                                // Filter to only include items where the sponsor actually matches
+                                const filtered = Array.isArray(results) ? results.filter(leg => {
+                                    const introducedBy = leg.introducedBy || leg.primarySponsor || '';
+                                    const coIntroducers = leg.coIntroducers || '';
+                                    // Check if sponsor name appears in any sponsor field
+                                    const sponsorText = `${introducedBy} ${coIntroducers}`.toLowerCase();
+                                    return sponsorText.includes(sponsor.toLowerCase());
+                                }) : [];
+                                
+                                return filtered;
+                            } catch (err) {
+                                console.error(`Error searching for sponsor "${sponsor}":`, err);
+                                return [];
+                            }
+                        });
+                        allPromises.push(...sponsorPromises);
+                    }
+
+                    const results = await Promise.all(allPromises);
                     
                     const allLegislation = [];
                     const seenIds = new Set();
@@ -1125,6 +1137,56 @@
 
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             <div className="space-y-6">
+                                <div className="bg-white rounded-lg shadow-lg p-6">
+                                    <h2 className="text-xl font-semibold mb-4">Search Mode</h2>
+                                    <div className="space-y-2">
+                                        <label className="flex items-center">
+                                            <input
+                                                type="radio"
+                                                name="searchMode"
+                                                value="all"
+                                                checked={searchMode === 'all'}
+                                                onChange={(e) => setSearchMode(e.target.value)}
+                                                className="mr-2"
+                                            />
+                                            <span className="text-sm">Search All (Keywords + Committees + Sponsors)</span>
+                                        </label>
+                                        <label className="flex items-center">
+                                            <input
+                                                type="radio"
+                                                name="searchMode"
+                                                value="keywords"
+                                                checked={searchMode === 'keywords'}
+                                                onChange={(e) => setSearchMode(e.target.value)}
+                                                className="mr-2"
+                                            />
+                                            <span className="text-sm">Keywords Only</span>
+                                        </label>
+                                        <label className="flex items-center">
+                                            <input
+                                                type="radio"
+                                                name="searchMode"
+                                                value="committees"
+                                                checked={searchMode === 'committees'}
+                                                onChange={(e) => setSearchMode(e.target.value)}
+                                                className="mr-2"
+                                            />
+                                            <span className="text-sm">Committees Only</span>
+                                        </label>
+                                        <label className="flex items-center">
+                                            <input
+                                                type="radio"
+                                                name="searchMode"
+                                                value="sponsors"
+                                                checked={searchMode === 'sponsors'}
+                                                onChange={(e) => setSearchMode(e.target.value)}
+                                                className="mr-2"
+                                            />
+                                            <span className="text-sm">Sponsors Only</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                
                                 <div className="bg-white rounded-lg shadow-lg p-6">
                                     <div className="flex items-center justify-between mb-4">
                                         <h2 className="text-xl font-semibold">Tracked Keywords</h2>
