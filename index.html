@@ -19,7 +19,7 @@
         // Initialize Supabase client
         // IMPORTANT: Replace these with your actual Supabase URL and anon key
         const SUPABASE_URL = 'https://owqylzpuxwsldepufxep.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_IWFsW7Fp1xUzKkr82yVavw_wu236ZdP'; // Get this from Supabase dashboard
+        const SUPABASE_ANON_KEY = 'sb_publishable_IWFsW7Fp1xUzKkr82yVavw_wu236ZdPE'; // Get this from Supabase dashboard
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         function DCPolicyTracker() {
@@ -53,8 +53,12 @@
             const [editingNote, setEditingNote] = useState(null);
             const [noteText, setNoteText] = useState('');
             const [showManualEntry, setShowManualEntry] = useState(false);
+            const [editingManualEntry, setEditingManualEntry] = useState(null);
             const [showActivityLog, setShowActivityLog] = useState(false);
             const [showEmailPreview, setShowEmailPreview] = useState(false);
+            const [showTeamManagement, setShowTeamManagement] = useState(false);
+            const [editingTeamMember, setEditingTeamMember] = useState(null);
+            const [teamMemberForm, setTeamMemberForm] = useState({ name: '', email: '' });
             const [activityLog, setActivityLog] = useState([]);
             const [manualEntry, setManualEntry] = useState({
                 title: '',
@@ -64,7 +68,10 @@
                 link: '',
                 assignedTo: 'Unassigned',
                 priority: 'medium',
-                actionStatus: 'action_needed'
+                actionStatus: 'action_needed',
+                noticeId: '',
+                registerIssue: '',
+                registerNotes: ''
             });
 
             const PROXY_URL = 'https://dcpca-policy-tracker.vercel.app/api/hello';
@@ -110,7 +117,11 @@
                             hasNewActivity: item.has_new_activity || false,
                             activitySummary: item.activity_summary || null,
                             lastStatus: item.last_status || null,
-                            lastCheckedAt: item.last_checked_at
+                            lastCheckedAt: item.last_checked_at,
+                            noticeId: item.notice_id || null,
+                            registerIssue: item.register_issue || null,
+                            registerNotes: item.register_notes || null,
+                            isManualEntry: item.is_manual_entry || false
                         }));
                         
                         // IMMEDIATELY show tracked items (this is the key change!)
@@ -834,7 +845,11 @@
                     assignedTo: manualEntry.assignedTo,
                     priority: manualEntry.priority,
                     actionStatus: manualEntry.actionStatus,
-                    introducedBy: null
+                    introducedBy: null,
+                    noticeId: manualEntry.noticeId,
+                    registerIssue: manualEntry.registerIssue,
+                    registerNotes: manualEntry.registerNotes,
+                    isManualEntry: true
                 };
 
                 try {
@@ -857,7 +872,10 @@
                             assigned_to: newItem.assignedTo,
                             priority: newItem.priority,
                             action_status: newItem.actionStatus,
-                            introduced_by: null
+                            introduced_by: null,
+                            notice_id: newItem.noticeId,
+                            register_issue: newItem.registerIssue,
+                            register_notes: newItem.registerNotes
                         });
                     
                     if (error) throw error;
@@ -880,11 +898,263 @@
                         link: '',
                         assignedTo: 'Unassigned',
                         priority: 'medium',
-                        actionStatus: 'action_needed'
+                        actionStatus: 'action_needed',
+                        noticeId: '',
+                        registerIssue: '',
+                        registerNotes: ''
                     });
                 } catch (err) {
                     console.error('Error adding manual entry:', err);
                     setError('Failed to add manual entry: ' + err.message);
+                }
+            };
+
+            const editManualEntry = (item) => {
+                setEditingManualEntry(item.id);
+                setManualEntry({
+                    title: item.title,
+                    agency: item.agency || '',
+                    status: item.status,
+                    date: item.date,
+                    link: item.link || '',
+                    assignedTo: item.assignedTo,
+                    priority: item.priority,
+                    actionStatus: item.actionStatus,
+                    noticeId: item.noticeId || '',
+                    registerIssue: item.registerIssue || '',
+                    registerNotes: item.registerNotes || ''
+                });
+                setShowManualEntry(true);
+            };
+
+            const updateManualEntry = async () => {
+                if (!manualEntry.title.trim()) {
+                    alert('Please enter a title');
+                    return;
+                }
+
+                try {
+                    const { error } = await supabase
+                        .from('tracked_items')
+                        .update({
+                            title: manualEntry.title,
+                            agency: manualEntry.agency,
+                            status: manualEntry.status,
+                            date: manualEntry.date,
+                            link: manualEntry.link,
+                            assigned_to: manualEntry.assignedTo,
+                            priority: manualEntry.priority,
+                            action_status: manualEntry.actionStatus,
+                            notice_id: manualEntry.noticeId,
+                            register_issue: manualEntry.registerIssue,
+                            register_notes: manualEntry.registerNotes,
+                            description: manualEntry.title
+                        })
+                        .eq('id', editingManualEntry);
+                    
+                    if (error) throw error;
+                    
+                    // Update in local state
+                    setItems(items.map(item => 
+                        item.id === editingManualEntry
+                            ? {
+                                ...item,
+                                title: manualEntry.title,
+                                agency: manualEntry.agency,
+                                status: manualEntry.status,
+                                date: manualEntry.date,
+                                link: manualEntry.link,
+                                assignedTo: manualEntry.assignedTo,
+                                priority: manualEntry.priority,
+                                actionStatus: manualEntry.actionStatus,
+                                noticeId: manualEntry.noticeId,
+                                registerIssue: manualEntry.registerIssue,
+                                registerNotes: manualEntry.registerNotes,
+                                description: manualEntry.title
+                            }
+                            : item
+                    ));
+                    
+                    await logActivity('manual_entry_updated', editingManualEntry, manualEntry.title);
+                    
+                    setShowManualEntry(false);
+                    setEditingManualEntry(null);
+                    setManualEntry({
+                        title: '',
+                        agency: '',
+                        status: 'Published',
+                        date: new Date().toISOString().split('T')[0],
+                        link: '',
+                        assignedTo: 'Unassigned',
+                        priority: 'medium',
+                        actionStatus: 'action_needed',
+                        noticeId: '',
+                        registerIssue: '',
+                        registerNotes: ''
+                    });
+                } catch (err) {
+                    console.error('Error updating manual entry:', err);
+                    setError('Failed to update manual entry: ' + err.message);
+                }
+            };
+
+            const deleteManualEntry = async (itemId) => {
+                if (!confirm('Are you sure you want to delete this entry? This cannot be undone.')) {
+                    return;
+                }
+
+                try {
+                    const { error } = await supabase
+                        .from('tracked_items')
+                        .delete()
+                        .eq('id', itemId);
+                    
+                    if (error) throw error;
+                    
+                    // Remove from local state
+                    setItems(items.filter(item => item.id !== itemId));
+                    const newSelected = new Set(selectedItems);
+                    newSelected.delete(itemId);
+                    setSelectedItems(newSelected);
+                    
+                    await logActivity('manual_entry_deleted', itemId, null);
+                } catch (err) {
+                    console.error('Error deleting manual entry:', err);
+                    setError('Failed to delete manual entry: ' + err.message);
+                }
+            };
+
+            const addTeamMember = async () => {
+                if (!teamMemberForm.name.trim()) {
+                    alert('Please enter a name');
+                    return;
+                }
+
+                try {
+                    const { error } = await supabase
+                        .from('team_members')
+                        .insert({
+                            name: teamMemberForm.name,
+                            email: teamMemberForm.email || null,
+                            active: true
+                        });
+                    
+                    if (error) throw error;
+                    
+                    // Reload team members
+                    const { data: membersData } = await supabase
+                        .from('team_members')
+                        .select('*')
+                        .eq('active', true)
+                        .order('name', { ascending: true });
+                    
+                    if (membersData) {
+                        setTeamMembers(membersData);
+                    }
+                    
+                    setTeamMemberForm({ name: '', email: '' });
+                    await logActivity('team_member_added', null, null, { name: teamMemberForm.name });
+                } catch (err) {
+                    console.error('Error adding team member:', err);
+                    setError('Failed to add team member: ' + err.message);
+                }
+            };
+
+            const editTeamMember = (member) => {
+                setEditingTeamMember(member.id);
+                setTeamMemberForm({ name: member.name, email: member.email || '' });
+            };
+
+            const updateTeamMember = async () => {
+                if (!teamMemberForm.name.trim()) {
+                    alert('Please enter a name');
+                    return;
+                }
+
+                try {
+                    const oldMember = teamMembers.find(m => m.id === editingTeamMember);
+                    
+                    const { error } = await supabase
+                        .from('team_members')
+                        .update({
+                            name: teamMemberForm.name,
+                            email: teamMemberForm.email || null
+                        })
+                        .eq('id', editingTeamMember);
+                    
+                    if (error) throw error;
+                    
+                    // Update assignments if name changed
+                    if (oldMember && oldMember.name !== teamMemberForm.name) {
+                        const { error: updateError } = await supabase
+                            .from('tracked_items')
+                            .update({ assigned_to: teamMemberForm.name })
+                            .eq('assigned_to', oldMember.name);
+                        
+                        if (updateError) console.error('Error updating assignments:', updateError);
+                        
+                        // Update local items
+                        setItems(items.map(item => 
+                            item.assignedTo === oldMember.name 
+                                ? { ...item, assignedTo: teamMemberForm.name }
+                                : item
+                        ));
+                    }
+                    
+                    // Reload team members
+                    const { data: membersData } = await supabase
+                        .from('team_members')
+                        .select('*')
+                        .eq('active', true)
+                        .order('name', { ascending: true });
+                    
+                    if (membersData) {
+                        setTeamMembers(membersData);
+                    }
+                    
+                    setEditingTeamMember(null);
+                    setTeamMemberForm({ name: '', email: '' });
+                    
+                    await logActivity('team_member_updated', null, null, { 
+                        from: oldMember?.name, 
+                        to: teamMemberForm.name 
+                    });
+                } catch (err) {
+                    console.error('Error updating team member:', err);
+                    setError('Failed to update team member: ' + err.message);
+                }
+            };
+
+            const deleteTeamMember = async (memberId) => {
+                const member = teamMembers.find(m => m.id === memberId);
+                
+                if (!confirm(`Are you sure you want to delete ${member?.name}? All assignments to this person will remain but won't be in the dropdown.`)) {
+                    return;
+                }
+
+                try {
+                    const { error } = await supabase
+                        .from('team_members')
+                        .update({ active: false })
+                        .eq('id', memberId);
+                    
+                    if (error) throw error;
+                    
+                    // Reload team members
+                    const { data: membersData } = await supabase
+                        .from('team_members')
+                        .select('*')
+                        .eq('active', true)
+                        .order('name', { ascending: true });
+                    
+                    if (membersData) {
+                        setTeamMembers(membersData);
+                    }
+                    
+                    await logActivity('team_member_deleted', null, null, { name: member?.name });
+                } catch (err) {
+                    console.error('Error deleting team member:', err);
+                    setError('Failed to delete team member: ' + err.message);
                 }
             };
 
@@ -1050,6 +1320,12 @@
                                     <p className="text-gray-600">Legislative Monitoring System</p>
                                 </div>
                                 <div className="flex gap-2 flex-wrap">
+                                    <button
+                                        onClick={() => setShowTeamManagement(true)}
+                                        className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                                    >
+                                        👥 Manage Team
+                                    </button>
                                     <button
                                         onClick={() => setShowEmailPreview(true)}
                                         className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -1451,6 +1727,27 @@
                                                             </div>
                                                         )}
 
+                                                        {item.isManualEntry && (item.noticeId || item.registerIssue || item.registerNotes) && (
+                                                            <div className="mb-2 p-2 bg-purple-50 border border-purple-200 rounded">
+                                                                {item.noticeId && (
+                                                                    <div className="text-xs mb-1">
+                                                                        <span className="font-semibold">Notice ID:</span> {item.noticeId}
+                                                                    </div>
+                                                                )}
+                                                                {item.registerIssue && (
+                                                                    <div className="text-xs mb-1">
+                                                                        <span className="font-semibold">Register Issue:</span> {item.registerIssue}
+                                                                    </div>
+                                                                )}
+                                                                {item.registerNotes && (
+                                                                    <div className="text-xs">
+                                                                        <span className="font-semibold">Register Notes:</span>
+                                                                        <p className="mt-1 whitespace-pre-wrap">{item.registerNotes}</p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+
                                                         {selectedItems.has(item.id) && (
                                                             <div className="grid grid-cols-3 gap-2 mb-2">
                                                                 <div>
@@ -1517,15 +1814,33 @@
                                                                 <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded">{item.status}</span>
                                                                 <span>{item.date}</span>
                                                             </div>
-                                                            <button
-                                                                onClick={() => {
-                                                                    setEditingNote(item.id);
-                                                                    setNoteText(itemNotes[item.id] || '');
-                                                                }}
-                                                                className="text-sm text-indigo-600 hover:text-indigo-800"
-                                                            >
-                                                                {itemNotes[item.id] ? 'Edit Note' : 'Add Note'}
-                                                            </button>
+                                                            <div className="flex gap-2">
+                                                                {item.isManualEntry && (
+                                                                    <>
+                                                                        <button
+                                                                            onClick={() => editManualEntry(item)}
+                                                                            className="text-sm text-blue-600 hover:text-blue-800"
+                                                                        >
+                                                                            Edit
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={() => deleteManualEntry(item.id)}
+                                                                            className="text-sm text-red-600 hover:text-red-800"
+                                                                        >
+                                                                            Delete
+                                                                        </button>
+                                                                    </>
+                                                                )}
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setEditingNote(item.id);
+                                                                        setNoteText(itemNotes[item.id] || '');
+                                                                    }}
+                                                                    className="text-sm text-indigo-600 hover:text-indigo-800"
+                                                                >
+                                                                    {itemNotes[item.id] ? 'Edit Note' : 'Add Note'}
+                                                                </button>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -1680,7 +1995,9 @@
                     {showManualEntry && (
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
                             <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-screen overflow-y-auto">
-                                <h3 className="text-xl font-semibold mb-4">Add DC Register Item</h3>
+                                <h3 className="text-xl font-semibold mb-4">
+                                    {editingManualEntry ? 'Edit DC Register Item' : 'Add DC Register Item'}
+                                </h3>
                                 <p className="text-sm text-gray-600 mb-4">
                                     Visit <a href="https://www.dcregs.dc.gov/" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">dcregs.dc.gov</a> to find recent regulations
                                 </p>
@@ -1694,6 +2011,28 @@
                                             placeholder="e.g., Department of Health - Notice of Final Rulemaking..."
                                             className="w-full px-3 py-2 border rounded-lg"
                                         />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1">Notice ID</label>
+                                            <input
+                                                type="text"
+                                                value={manualEntry.noticeId}
+                                                onChange={(e) => setManualEntry({...manualEntry, noticeId: e.target.value})}
+                                                placeholder="e.g., 2024-123"
+                                                className="w-full px-3 py-2 border rounded-lg"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1">Register Issue</label>
+                                            <input
+                                                type="text"
+                                                value={manualEntry.registerIssue}
+                                                onChange={(e) => setManualEntry({...manualEntry, registerIssue: e.target.value})}
+                                                placeholder="e.g., Vol. 71, No. 23"
+                                                className="w-full px-3 py-2 border rounded-lg"
+                                            />
+                                        </div>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-1">Agency</label>
@@ -1713,6 +2052,7 @@
                                                 onChange={(e) => setManualEntry({...manualEntry, status: e.target.value})}
                                                 className="w-full px-3 py-2 border rounded-lg"
                                             >
+                                                <option>Notice</option>
                                                 <option>Published</option>
                                                 <option>Proposed</option>
                                                 <option>Final Rulemaking</option>
@@ -1729,6 +2069,15 @@
                                                 className="w-full px-3 py-2 border rounded-lg"
                                             />
                                         </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">Register Notes</label>
+                                        <textarea
+                                            value={manualEntry.registerNotes}
+                                            onChange={(e) => setManualEntry({...manualEntry, registerNotes: e.target.value})}
+                                            placeholder="Paste text from the DC Register notice..."
+                                            className="w-full px-3 py-2 border rounded-lg h-32"
+                                        />
                                     </div>
                                     <div className="grid grid-cols-3 gap-4">
                                         <div>
@@ -1783,14 +2132,15 @@
                                 </div>
                                 <div className="flex gap-2 mt-6">
                                     <button
-                                        onClick={addManualEntry}
+                                        onClick={editingManualEntry ? updateManualEntry : addManualEntry}
                                         className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
                                     >
-                                        Add Item
+                                        {editingManualEntry ? 'Update Item' : 'Add Item'}
                                     </button>
                                     <button
                                         onClick={() => {
                                             setShowManualEntry(false);
+                                            setEditingManualEntry(null);
                                             setManualEntry({
                                                 title: '',
                                                 agency: '',
@@ -1799,7 +2149,10 @@
                                                 link: '',
                                                 assignedTo: 'Unassigned',
                                                 priority: 'medium',
-                                                actionStatus: 'action_needed'
+                                                actionStatus: 'action_needed',
+                                                noticeId: '',
+                                                registerIssue: '',
+                                                registerNotes: ''
                                             });
                                         }}
                                         className="flex-1 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
@@ -1880,6 +2233,112 @@
                                     >
                                         Close
                                     </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showTeamManagement && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                            <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-screen overflow-y-auto">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-xl font-semibold">Manage Team Members</h3>
+                                    <button
+                                        onClick={() => {
+                                            setShowTeamManagement(false);
+                                            setEditingTeamMember(null);
+                                            setTeamMemberForm({ name: '', email: '' });
+                                        }}
+                                        className="text-gray-500 hover:text-gray-700 text-2xl"
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                                
+                                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <h4 className="font-semibold mb-3">
+                                        {editingTeamMember ? 'Edit Team Member' : 'Add New Team Member'}
+                                    </h4>
+                                    <div className="grid grid-cols-2 gap-4 mb-3">
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1">Name *</label>
+                                            <input
+                                                type="text"
+                                                value={teamMemberForm.name}
+                                                onChange={(e) => setTeamMemberForm({...teamMemberForm, name: e.target.value})}
+                                                placeholder="e.g., John Doe"
+                                                className="w-full px-3 py-2 border rounded-lg"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1">Email (optional)</label>
+                                            <input
+                                                type="email"
+                                                value={teamMemberForm.email}
+                                                onChange={(e) => setTeamMemberForm({...teamMemberForm, email: e.target.value})}
+                                                placeholder="john@example.com"
+                                                className="w-full px-3 py-2 border rounded-lg"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={editingTeamMember ? updateTeamMember : addTeamMember}
+                                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                        >
+                                            {editingTeamMember ? 'Update' : 'Add Team Member'}
+                                        </button>
+                                        {editingTeamMember && (
+                                            <button
+                                                onClick={() => {
+                                                    setEditingTeamMember(null);
+                                                    setTeamMemberForm({ name: '', email: '' });
+                                                }}
+                                                className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
+                                            >
+                                                Cancel
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <h4 className="font-semibold mb-2">Current Team Members</h4>
+                                    {teamMembers.map(member => (
+                                        <div key={member.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                            <div>
+                                                <div className="font-medium">{member.name}</div>
+                                                {member.email && (
+                                                    <div className="text-sm text-gray-600">{member.email}</div>
+                                                )}
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => editTeamMember(member)}
+                                                    className="px-3 py-1 text-sm text-blue-600 hover:text-blue-800"
+                                                >
+                                                    Edit
+                                                </button>
+                                                {member.name !== 'Unassigned' && (
+                                                    <button
+                                                        onClick={() => deleteTeamMember(member.id)}
+                                                        className="px-3 py-1 text-sm text-red-600 hover:text-red-800"
+                                                    >
+                                                        Delete
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {teamMembers.length === 0 && (
+                                        <div className="text-center py-8 text-gray-500">
+                                            No team members yet. Add one above!
+                                        </div>
+                                    )}
+                                </div>
+                                
+                                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
+                                    <strong>Note:</strong> Editing a team member's name will update all items assigned to them. Deleting removes them from the dropdown but preserves existing assignments.
                                 </div>
                             </div>
                         </div>
