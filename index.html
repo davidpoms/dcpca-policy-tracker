@@ -332,15 +332,35 @@
                                     OffSet: 0
                                 });
                                 
+                                console.log(`Sponsor search for "${sponsor}":`, results);
+                                
                                 // Filter to only include items where the sponsor actually matches
                                 const filtered = Array.isArray(results) ? results.filter(leg => {
-                                    const introducedBy = leg.introducedBy || leg.primarySponsor || '';
+                                    // Check all possible sponsor fields
+                                    const introducedBy = leg.introducedBy || '';
+                                    const primarySponsor = leg.primarySponsor || '';
                                     const coIntroducers = leg.coIntroducers || '';
-                                    // Check if sponsor name appears in any sponsor field
-                                    const sponsorText = `${introducedBy} ${coIntroducers}`.toLowerCase();
-                                    return sponsorText.includes(sponsor.toLowerCase());
+                                    const introducers = leg.introducers || '';
+                                    const sponsor_field = leg.sponsor || '';
+                                    
+                                    // Combine all sponsor-related fields
+                                    const sponsorText = `${introducedBy} ${primarySponsor} ${coIntroducers} ${introducers} ${sponsor_field}`.toLowerCase();
+                                    
+                                    const matches = sponsorText.includes(sponsor.toLowerCase());
+                                    
+                                    if (matches) {
+                                        console.log(`Match found for "${sponsor}":`, {
+                                            title: leg.title,
+                                            introducedBy,
+                                            primarySponsor,
+                                            coIntroducers
+                                        });
+                                    }
+                                    
+                                    return matches;
                                 }) : [];
                                 
+                                console.log(`Filtered results for "${sponsor}":`, filtered.length);
                                 return filtered;
                             } catch (err) {
                                 console.error(`Error searching for sponsor "${sponsor}":`, err);
@@ -374,8 +394,20 @@
                             committees = [committeeStr];
                         }
                         
-                        // Get introduced by information
-                        const introducedBy = leg.introducedBy || leg.primarySponsor || null;
+                        // Get introduced by information - check multiple possible fields
+                        const introducedBy = leg.introducedBy || leg.primarySponsor || leg.introducers || leg.sponsor || null;
+                        
+                        // Log what we found for debugging
+                        if (introducedBy) {
+                            console.log('Found sponsor info:', {
+                                billNumber: leg.legislationNumber,
+                                introducedBy: leg.introducedBy,
+                                primarySponsor: leg.primarySponsor,
+                                introducers: leg.introducers,
+                                sponsor: leg.sponsor,
+                                selected: introducedBy
+                            });
+                        }
                         
                         return {
                             id: leg.legislationNumber,
