@@ -19,7 +19,7 @@
         // Initialize Supabase client
         // IMPORTANT: Replace these with your actual Supabase URL and anon key
         const SUPABASE_URL = 'https://owqylzpuxwsldepufxep.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_IWFsW7Fp1xUzKkr82yVavw_wu236ZdP'; // Get this from Supabase dashboard
+        const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY_HERE'; // Get this from Supabase dashboard
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         function DCPolicyTracker() {
@@ -105,7 +105,11 @@
                             assignedTo: item.assigned_to,
                             priority: item.priority,
                             actionStatus: item.action_status || 'action_needed',
-                            introducedBy: item.introduced_by
+                            introducedBy: item.introduced_by,
+                            hasNewActivity: item.has_new_activity || false,
+                            activitySummary: item.activity_summary || null,
+                            lastStatus: item.last_status || null,
+                            lastCheckedAt: item.last_checked_at
                         }));
                         
                         // IMMEDIATELY show tracked items (this is the key change!)
@@ -380,11 +384,30 @@
                         if (selectedItems.has(item.id)) {
                             const existing = items.find(i => i.id === item.id);
                             if (existing) {
+                                // Detect activity changes
+                                let hasNewActivity = false;
+                                let activitySummary = null;
+                                
+                                // Check if status changed
+                                if (existing.lastStatus && existing.status !== item.status) {
+                                    hasNewActivity = true;
+                                    activitySummary = `Status changed from "${existing.lastStatus}" to "${item.status}"`;
+                                }
+                                
+                                // Update the item in database with new activity info
+                                if (hasNewActivity) {
+                                    updateItemActivity(item.id, item.status, activitySummary);
+                                }
+                                
                                 return {
                                     ...item,
                                     assignedTo: existing.assignedTo,
                                     priority: existing.priority,
-                                    actionStatus: existing.actionStatus
+                                    actionStatus: existing.actionStatus,
+                                    hasNewActivity: hasNewActivity,
+                                    activitySummary: activitySummary,
+                                    lastStatus: item.status,
+                                    lastCheckedAt: new Date().toISOString()
                                 };
                             }
                         }
@@ -450,7 +473,10 @@
                                 assigned_to: 'Unassigned',
                                 priority: 'medium',
                                 action_status: 'action_needed',
-                                introduced_by: item.introducedBy
+                                introduced_by: item.introducedBy,
+                                last_status: item.status,
+                                last_checked_at: new Date().toISOString(),
+                                has_new_activity: false
                             });
                         
                         if (error) throw error;
@@ -552,6 +578,49 @@
                 } catch (err) {
                     console.error('Error updating action status:', err);
                     setError('Failed to update action status: ' + err.message);
+                }
+            };
+
+            const updateItemActivity = async (itemId, newStatus, activitySummary) => {
+                try {
+                    const { error } = await supabase
+                        .from('tracked_items')
+                        .update({
+                            last_status: newStatus,
+                            has_new_activity: true,
+                            activity_summary: activitySummary,
+                            last_checked_at: new Date().toISOString()
+                        })
+                        .eq('id', itemId);
+                    
+                    if (error) throw error;
+                    
+                    await logActivity('activity_detected', itemId, null, {
+                        summary: activitySummary
+                    });
+                } catch (err) {
+                    console.error('Error updating item activity:', err);
+                }
+            };
+
+            const markActivityAsSeen = async (itemId) => {
+                try {
+                    const { error } = await supabase
+                        .from('tracked_items')
+                        .update({
+                            has_new_activity: false,
+                            activity_summary: null
+                        })
+                        .eq('id', itemId);
+                    
+                    if (error) throw error;
+                    
+                    setItems(items.map(i => 
+                        i.id === itemId ? { ...i, hasNewActivity: false, activitySummary: null } : i
+                    ));
+                } catch (err) {
+                    console.error('Error marking activity as seen:', err);
+                    setError('Failed to mark activity as seen: ' + err.message);
                 }
             };
 
@@ -1018,6 +1087,11 @@
                                     <div>
                                         Council Period: <strong>{selectedPeriod.councilPeriod}</strong>
                                         {selectedItems.size > 0 && <span className="ml-2 px-2 py-1 bg-indigo-100 text-indigo-700 rounded">{selectedItems.size} items tracked</span>}
+                                        {items.filter(i => i.hasNewActivity && selectedItems.has(i.id)).length > 0 && (
+                                            <span className="ml-2 px-2 py-1 bg-orange-500 text-white rounded animate-pulse">
+                                                🔔 {items.filter(i => i.hasNewActivity && selectedItems.has(i.id)).length} with new activity
+                                            </span>
+                                        )}
                                     </div>
                                     <div className="flex gap-2">
                                         <button
@@ -1257,6 +1331,11 @@
                                                                     NEW
                                                                 </span>
                                                             )}
+                                                            {item.hasNewActivity && selectedItems.has(item.id) && (
+                                                                <span className="px-2 py-0.5 bg-orange-500 text-white text-xs font-bold rounded animate-pulse">
+                                                                    🔔 NEW ACTIVITY
+                                                                </span>
+                                                            )}
                                                             {selectedItems.has(item.id) && (
                                                                 <span className={`px-2 py-0.5 text-xs font-bold rounded ${getActionStatusColor(item.actionStatus)}`}>
                                                                     {getActionStatusLabel(item.actionStatus)}
@@ -1269,6 +1348,24 @@
                                                             )}
                                                             <h3 className="font-semibold">{item.title}</h3>
                                                         </div>
+                                                        
+                                                        {item.hasNewActivity && item.activitySummary && selectedItems.has(item.id) && (
+                                                            <div className="mb-2 p-2 bg-orange-50 border-l-4 border-orange-500 rounded">
+                                                                <div className="flex justify-between items-start">
+                                                                    <div>
+                                                                        <div className="text-xs font-semibold text-orange-800 mb-1">Activity Update:</div>
+                                                                        <p className="text-sm text-orange-700">{item.activitySummary}</p>
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={() => markActivityAsSeen(item.id)}
+                                                                        className="text-xs text-orange-600 hover:text-orange-800 underline ml-2"
+                                                                    >
+                                                                        Dismiss
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        
                                                         <div className="text-xs text-gray-500 mb-2">
                                                             <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">
                                                                 {item.billNumber || item.id}
