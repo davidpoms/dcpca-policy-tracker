@@ -321,57 +321,32 @@
                     }
 
                     // Search by sponsors (only if search mode allows)
-                    // Note: The API's Keyword parameter searches titles, not sponsors
-                    // So we need to fetch ALL legislation and filter by sponsor field
+                    // Use BulkData endpoint which includes full legislation details including sponsors
                     if ((searchMode === 'all' || searchMode === 'sponsors') && trackedSponsors.length > 0) {
                         const sponsorPromises = trackedSponsors.map(async sponsor => {
                             try {
-                                // Fetch ALL legislation by making multiple paginated requests
-                                let allLegislation = [];
-                                let offset = 0;
-                                const limit = 100;
-                                let hasMore = true;
+                                console.log(`Fetching bulk data to find bills by "${sponsor}"...`);
                                 
-                                console.log(`Fetching all legislation to find bills by "${sponsor}"...`);
+                                // Use BulkData endpoint which includes full legislation details
+                                // CategoryId: 0 = all categories
+                                const bulkData = await proxyFetch('/BulkData/0/' + selectedPeriod.councilPeriodId);
                                 
-                                while (hasMore) {
-                                    const results = await proxyFetch('/SearchLegislation', 'POST', {
-                                        Keyword: '', // Empty keyword to get all legislation
-                                        CategoryId: 0,
-                                        CouncilPeriodId: selectedPeriod.councilPeriodId,
-                                        RowLimit: limit,
-                                        OffSet: offset
-                                    });
-                                    
-                                    if (results && results.length > 0) {
-                                        allLegislation = allLegislation.concat(results);
-                                        offset += limit;
-                                        hasMore = results.length === limit; // Continue if we got a full page
-                                        console.log(`Fetched ${allLegislation.length} bills so far...`);
-                                    } else {
-                                        hasMore = false;
-                                    }
-                                }
+                                console.log(`BulkData returned ${bulkData?.length || 0} bills`);
                                 
-                                console.log(`Total bills fetched: ${allLegislation.length}`);
-                                
-                                // Log a sample bill to see the actual field structure
-                                if (allLegislation.length > 0) {
-                                    console.log('Sample bill structure:', {
-                                        legislationNumber: allLegislation[0].legislationNumber,
-                                        introducedBy: allLegislation[0].introducedBy,
-                                        primarySponsor: allLegislation[0].primarySponsor,
-                                        introducers: allLegislation[0].introducers,
-                                        coIntroducers: allLegislation[0].coIntroducers,
-                                        sponsor: allLegislation[0].sponsor,
-                                        introducersType: typeof allLegislation[0].introducers,
-                                        introducersIsArray: Array.isArray(allLegislation[0].introducers)
+                                // Log sample to see structure
+                                if (bulkData && bulkData.length > 0) {
+                                    console.log('BulkData sample bill:', {
+                                        legislationNumber: bulkData[0].legislationNumber,
+                                        introducedBy: bulkData[0].introducedBy,
+                                        introducers: bulkData[0].introducers,
+                                        primarySponsor: bulkData[0].primarySponsor,
+                                        introducersType: typeof bulkData[0].introducers
                                     });
                                 }
                                 
-                                // Now filter strictly by sponsor fields only
-                                const filtered = allLegislation.filter(leg => {
-                                    // Check all possible sponsor fields - but NOT the title
+                                // Filter by sponsor fields
+                                const filtered = Array.isArray(bulkData) ? bulkData.filter(leg => {
+                                    // Check all possible sponsor fields
                                     const introducedBy = leg.introducedBy || '';
                                     const primarySponsor = leg.primarySponsor || '';
                                     const coIntroducers = leg.coIntroducers || '';
@@ -387,25 +362,22 @@
                                         introducers = leg.introducers || '';
                                     }
                                     
-                                    // Combine only sponsor-related fields (not title or description)
+                                    // Combine only sponsor-related fields
                                     const sponsorText = `${introducedBy} ${primarySponsor} ${coIntroducers} ${introducers} ${sponsor_field}`.toLowerCase();
                                     
                                     const matches = sponsorText.includes(sponsor.toLowerCase());
                                     
                                     if (matches) {
-                                        console.log(`✓ Match found for sponsor "${sponsor}":`, {
+                                        console.log(`✓ Sponsor match for "${sponsor}":`, {
                                             billNumber: leg.legislationNumber,
                                             title: leg.title,
                                             introducedBy,
-                                            primarySponsor,
-                                            coIntroducers,
-                                            introducers: leg.introducers,
-                                            matchedIn: sponsorText
+                                            introducers: leg.introducers
                                         });
                                     }
                                     
                                     return matches;
-                                });
+                                }) : [];
                                 
                                 console.log(`Found ${filtered.length} bills introduced by "${sponsor}"`);
                                 return filtered;
@@ -1601,6 +1573,9 @@
                                         >
                                             + Add
                                         </button>
+                                    </div>
+                                    <div className="mb-3 p-2 bg-yellow-50 border border-yellow-300 rounded text-xs text-yellow-800">
+                                        ⚠️ <strong>Limited functionality:</strong> The DC Council API doesn't include sponsor data. For accurate sponsor searches, use <a href="https://lims.dccouncil.gov/voteSearch" target="_blank" className="underline">lims.dccouncil.gov/voteSearch</a>
                                     </div>
                                     <div className="space-y-2">
                                         {trackedSponsors.map(sponsor => (
