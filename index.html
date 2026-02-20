@@ -235,12 +235,19 @@
 
             const proxyFetch = async (endpoint, method = 'GET', body = null) => {
                 try {
-                    const params = new URLSearchParams({ endpoint, method });
-                    if (body) params.append('body', JSON.stringify(body));
+                    // Always POST to the proxy with endpoint/method/body in JSON
+                    const response = await fetch(PROXY_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            endpoint: endpoint,
+                            method: method,
+                            body: body
+                        })
+                    });
                     
-                    const url = `${PROXY_URL}?${params.toString()}`;
-                    
-                    const response = await fetch(url);
                     const data = await response.json();
                     
                     if (data.error) throw new Error(data.error);
