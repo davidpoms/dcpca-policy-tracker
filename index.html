@@ -355,14 +355,37 @@
                                 
                                 console.log(`Total bills fetched: ${allLegislation.length}`);
                                 
+                                // Log a sample bill to see the actual field structure
+                                if (allLegislation.length > 0) {
+                                    console.log('Sample bill structure:', {
+                                        legislationNumber: allLegislation[0].legislationNumber,
+                                        introducedBy: allLegislation[0].introducedBy,
+                                        primarySponsor: allLegislation[0].primarySponsor,
+                                        introducers: allLegislation[0].introducers,
+                                        coIntroducers: allLegislation[0].coIntroducers,
+                                        sponsor: allLegislation[0].sponsor,
+                                        introducersType: typeof allLegislation[0].introducers,
+                                        introducersIsArray: Array.isArray(allLegislation[0].introducers)
+                                    });
+                                }
+                                
                                 // Now filter strictly by sponsor fields only
                                 const filtered = allLegislation.filter(leg => {
                                     // Check all possible sponsor fields - but NOT the title
                                     const introducedBy = leg.introducedBy || '';
                                     const primarySponsor = leg.primarySponsor || '';
                                     const coIntroducers = leg.coIntroducers || '';
-                                    const introducers = leg.introducers || '';
                                     const sponsor_field = leg.sponsor || '';
+                                    
+                                    // Handle introducers - might be array or string
+                                    let introducers = '';
+                                    if (Array.isArray(leg.introducers)) {
+                                        introducers = leg.introducers.join(' ');
+                                    } else if (typeof leg.introducers === 'object' && leg.introducers !== null) {
+                                        introducers = JSON.stringify(leg.introducers);
+                                    } else {
+                                        introducers = leg.introducers || '';
+                                    }
                                     
                                     // Combine only sponsor-related fields (not title or description)
                                     const sponsorText = `${introducedBy} ${primarySponsor} ${coIntroducers} ${introducers} ${sponsor_field}`.toLowerCase();
@@ -376,7 +399,8 @@
                                             introducedBy,
                                             primarySponsor,
                                             coIntroducers,
-                                            introducers
+                                            introducers: leg.introducers,
+                                            matchedIn: sponsorText
                                         });
                                     }
                                     
