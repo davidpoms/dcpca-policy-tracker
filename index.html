@@ -19,7 +19,7 @@
         // Initialize Supabase client
         // IMPORTANT: Replace these with your actual Supabase URL and anon key
         const SUPABASE_URL = 'https://owqylzpuxwsldepufxep.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_IWFsW7Fp1xUzKkr82yVavw_wu236ZdP'; // Get this from Supabase dashboard
+        const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY_HERE'; // Get this from Supabase dashboard
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         function DCPolicyTracker() {
@@ -603,45 +603,38 @@
                 
                 try {
                     setLoading(true);
-                    console.log('Fetching legislation status for upcoming hearings...');
+                    console.log('Testing BulkData endpoint...');
+                    console.log('Council Period ID:', selectedPeriod.councilPeriodId);
                     
-                    // Fetch legislation status which includes hearing information
-                    const data = await proxyFetch('/LegislationStatus', 'POST', {
-                        CouncilPeriodId: selectedPeriod.councilPeriodId
-                    });
+                    // Try BulkData endpoint - category 0 = all categories
+                    const bulkData = await proxyFetch(`/BulkData/0/${selectedPeriod.councilPeriodId}`, 'POST', {});
                     
-                    console.log('LegislationStatus data:', data);
+                    console.log('BulkData response:', bulkData);
+                    console.log('Number of items:', bulkData?.length);
                     
-                    if (Array.isArray(data)) {
-                        // Filter for items with upcoming hearings
-                        const now = new Date();
-                        const itemsWithHearings = data.filter(item => {
-                            // Check if item has hearing-related status or upcoming hearing date
-                            const hasHearingStatus = item.status && (
-                                item.status.toLowerCase().includes('hearing') ||
-                                item.status.toLowerCase().includes('scheduled') ||
-                                item.status.toLowerCase().includes('notice')
-                            );
-                            
-                            // Check for hearing date fields
-                            const hearingDate = item.hearingDate || item.nextHearingDate || item.committeeHearingDate;
-                            const hasUpcomingDate = hearingDate && new Date(hearingDate) > now;
-                            
-                            return hasHearingStatus || hasUpcomingDate;
+                    if (bulkData && bulkData.length > 0) {
+                        console.log('Sample item 1:', bulkData[0]);
+                        console.log('Sample item 2:', bulkData[1]);
+                        console.log('Sample item 3:', bulkData[2]);
+                        
+                        // Check if any items have hearing-related fields
+                        const fieldsToCheck = ['hearingDate', 'nextHearingDate', 'committeeHearingDate', 'hearingScheduled', 'events', 'history'];
+                        fieldsToCheck.forEach(field => {
+                            const itemsWithField = bulkData.filter(item => item[field]);
+                            if (itemsWithField.length > 0) {
+                                console.log(`Found ${itemsWithField.length} items with ${field}:`, itemsWithField[0][field]);
+                            }
                         });
                         
-                        console.log(`Found ${itemsWithHearings.length} items with hearings`);
-                        setUpcomingHearings(itemsWithHearings);
-                        setShowUpcomingHearings(true);
+                        alert(`BulkData returned ${bulkData.length} items. Check console for detailed structure.`);
                     } else {
-                        setUpcomingHearings([]);
-                        setShowUpcomingHearings(true);
+                        alert('BulkData returned no data. Check console for errors.');
                     }
                     
                     setLoading(false);
                 } catch (err) {
-                    console.error('Error loading legislation status:', err);
-                    setError('Failed to load upcoming hearings: ' + err.message);
+                    console.error('BulkData endpoint error:', err);
+                    alert('BulkData error: ' + err.message + '. Check console for details.');
                     setLoading(false);
                 }
             };
@@ -1536,7 +1529,7 @@
                                         onClick={loadUpcomingHearings}
                                         className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700"
                                     >
-                                        📅 Upcoming Hearings
+                                        🔍 Test BulkData
                                     </button>
                                     <button
                                         onClick={() => setShowEmailPreview(true)}
