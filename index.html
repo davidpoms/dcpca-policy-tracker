@@ -45,6 +45,8 @@
             const [searchOffset, setSearchOffset] = useState(0);
             const [hasMoreResults, setHasMoreResults] = useState(true);
             const [currentSearchCategory, setCurrentSearchCategory] = useState(null);
+            const [upcomingHearings, setUpcomingHearings] = useState([]);
+            const [showUpcomingHearings, setShowUpcomingHearings] = useState(false);
             const [councilPeriods, setCouncilPeriods] = useState([]);
             const [selectedPeriod, setSelectedPeriod] = useState(null);
             const [loading, setLoading] = useState(false);
@@ -591,6 +593,57 @@
                 console.log('Checking for upcoming hearings in legislative history...');
                 // This is a placeholder - full implementation would fetch history from API
                 return {};
+            };
+
+            const loadUpcomingHearings = async () => {
+                if (!selectedPeriod) {
+                    setError('Please select a council period first');
+                    return;
+                }
+                
+                try {
+                    setLoading(true);
+                    console.log('Fetching legislation status for upcoming hearings...');
+                    
+                    // Fetch legislation status which includes hearing information
+                    const data = await proxyFetch('/LegislationStatus', 'POST', {
+                        CouncilPeriodId: selectedPeriod.councilPeriodId
+                    });
+                    
+                    console.log('LegislationStatus data:', data);
+                    
+                    if (Array.isArray(data)) {
+                        // Filter for items with upcoming hearings
+                        const now = new Date();
+                        const itemsWithHearings = data.filter(item => {
+                            // Check if item has hearing-related status or upcoming hearing date
+                            const hasHearingStatus = item.status && (
+                                item.status.toLowerCase().includes('hearing') ||
+                                item.status.toLowerCase().includes('scheduled') ||
+                                item.status.toLowerCase().includes('notice')
+                            );
+                            
+                            // Check for hearing date fields
+                            const hearingDate = item.hearingDate || item.nextHearingDate || item.committeeHearingDate;
+                            const hasUpcomingDate = hearingDate && new Date(hearingDate) > now;
+                            
+                            return hasHearingStatus || hasUpcomingDate;
+                        });
+                        
+                        console.log(`Found ${itemsWithHearings.length} items with hearings`);
+                        setUpcomingHearings(itemsWithHearings);
+                        setShowUpcomingHearings(true);
+                    } else {
+                        setUpcomingHearings([]);
+                        setShowUpcomingHearings(true);
+                    }
+                    
+                    setLoading(false);
+                } catch (err) {
+                    console.error('Error loading legislation status:', err);
+                    setError('Failed to load upcoming hearings: ' + err.message);
+                    setLoading(false);
+                }
             };
 
             const toggleSelection = async (itemId) => {
@@ -1478,6 +1531,12 @@
                                         className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
                                     >
                                         👥 Manage Team
+                                    </button>
+                                    <button
+                                        onClick={loadUpcomingHearings}
+                                        className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700"
+                                    >
+                                        📅 Upcoming Hearings
                                     </button>
                                     <button
                                         onClick={() => setShowEmailPreview(true)}
@@ -2586,6 +2645,80 @@
                                 <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
                                     <strong>Note:</strong> Editing a team member's name will update all items assigned to them. Deleting removes them from the dropdown but preserves existing assignments.
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showUpcomingHearings && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                            <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-screen overflow-y-auto">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-xl font-semibold">📅 Upcoming Public Hearings</h3>
+                                    <button
+                                        onClick={() => setShowUpcomingHearings(false)}
+                                        className="text-gray-500 hover:text-gray-700 text-2xl"
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                                
+                                {upcomingHearings.length === 0 ? (
+                                    <div className="text-center py-12">
+                                        <p className="text-gray-600 mb-4">
+                                            No upcoming hearings found for this council period.
+                                        </p>
+                                        <p className="text-sm text-gray-500 mb-4">
+                                            To view all upcoming hearings, please visit:
+                                        </p>
+                                        <a 
+                                            href="https://lims.dccouncil.gov" 
+                                            target="_blank" 
+                                            rel="noopener noreferrer"
+                                            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 inline-block"
+                                        >
+                                            View on LIMS Website
+                                        </a>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        {upcomingHearings.map((item, idx) => (
+                                            <div key={idx} className="p-4 border rounded-lg hover:bg-gray-50">
+                                                <div className="flex justify-between items-start mb-2">
+                                                    <div className="flex-1">
+                                                        <h4 className="font-semibold text-lg">{item.title || item.legislationTitle || 'Hearing Scheduled'}</h4>
+                                                        {item.legislationNumber && (
+                                                            <a 
+                                                                href={`https://lims.dccouncil.gov/Legislation/${item.legislationNumber}`}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="text-sm text-indigo-600 hover:underline"
+                                                            >
+                                                                {item.legislationNumber}
+                                                            </a>
+                                                        )}
+                                                    </div>
+                                                    <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-bold rounded ml-2">
+                                                        {item.status || 'HEARING'}
+                                                    </span>
+                                                </div>
+                                                {(item.hearingDate || item.nextHearingDate || item.committeeHearingDate) && (
+                                                    <p className="text-sm text-gray-600 mb-1">
+                                                        📅 {new Date(item.hearingDate || item.nextHearingDate || item.committeeHearingDate).toLocaleDateString()}
+                                                    </p>
+                                                )}
+                                                {item.committee && (
+                                                    <p className="text-sm text-gray-600 mb-1">🏛️ {item.committee}</p>
+                                                )}
+                                                {item.referredToCommittees && (
+                                                    <p className="text-sm text-gray-600 mb-1">🏛️ {item.referredToCommittees}</p>
+                                                )}
+                                                {item.shortDescription && (
+                                                    <p className="text-sm text-gray-700 mt-2">{item.shortDescription}</p>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
