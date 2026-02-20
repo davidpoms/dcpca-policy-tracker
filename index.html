@@ -581,6 +581,18 @@
                 quickSearchByCategory(currentSearchCategory, newOffset, true);
             };
 
+            // Function to check if an item has an upcoming hearing by examining its legislative history
+            const checkForUpcomingHearings = async (legislationNumbers) => {
+                // This would require fetching detailed legislative history for each item
+                // The DC Council API likely has an endpoint like /LegislationDetails/{legislationNumber}
+                // For now, we'll check the status field for hearing-related keywords
+                // A full implementation would need to call the API for each item's detailed history
+                
+                console.log('Checking for upcoming hearings in legislative history...');
+                // This is a placeholder - full implementation would fetch history from API
+                return {};
+            };
+
             const toggleSelection = async (itemId) => {
                 const item = items.find(i => i.id === itemId);
                 if (!item) return;
@@ -1404,8 +1416,15 @@
                 // Hide tracked items filter
                 const matchesHideTracked = !filters.hideTrackedItems || !selectedItems.has(item.id);
                 
-                // Upcoming hearing filter - check if hearing date is in the future
-                const matchesUpcomingHearing = !filters.hasUpcomingHearing || (item.hearingDate && new Date(item.hearingDate) > new Date());
+                // Upcoming hearing filter - check status for hearing-related keywords
+                const matchesUpcomingHearing = !filters.hasUpcomingHearing || (
+                    item.status && (
+                        item.status.toLowerCase().includes('hearing') ||
+                        item.status.toLowerCase().includes('scheduled') ||
+                        item.status.toLowerCase().includes('notice') ||
+                        item.status.toLowerCase().includes('markup')
+                    )
+                );
                 
                 return matchesKeyword && matchesCommittee && matchesCategory && matchesAssignedTo && matchesPriority && matchesActionStatus && matchesIntroducedBy && matchesHideTracked && matchesUpcomingHearing;
             });
@@ -1871,9 +1890,9 @@
                                                                     NEW
                                                                 </span>
                                                             )}
-                                                            {item.hearingDate && new Date(item.hearingDate) > new Date() && (
+                                                            {item.status && (item.status.toLowerCase().includes('hearing') || item.status.toLowerCase().includes('scheduled') || item.status.toLowerCase().includes('notice') || item.status.toLowerCase().includes('markup')) && (
                                                                 <span className="px-2 py-0.5 bg-yellow-500 text-white text-xs font-bold rounded">
-                                                                    📅 HEARING {new Date(item.hearingDate).toLocaleDateString()}
+                                                                    📅 HEARING
                                                                 </span>
                                                             )}
                                                             {item.hasNewActivity && selectedItems.has(item.id) && (
