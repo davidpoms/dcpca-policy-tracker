@@ -32,7 +32,8 @@
                 priority: 'all',
                 actionStatus: 'all',
                 introducedBy: 'all',
-                hideTrackedItems: false
+                hideTrackedItems: false,
+                hasUpcomingHearing: false
             });
             const [selectedItems, setSelectedItems] = useState(new Set());
             const [itemNotes, setItemNotes] = useState({});
@@ -41,6 +42,9 @@
             const [trackedSponsors, setTrackedSponsors] = useState([]);
             const [searchMode, setSearchMode] = useState('all'); // 'all', 'keywords', 'committees', 'sponsors'
             const [teamMembers, setTeamMembers] = useState([]);
+            const [searchOffset, setSearchOffset] = useState(0);
+            const [hasMoreResults, setHasMoreResults] = useState(true);
+            const [currentSearchCategory, setCurrentSearchCategory] = useState(null);
             const [councilPeriods, setCouncilPeriods] = useState([]);
             const [selectedPeriod, setSelectedPeriod] = useState(null);
             const [loading, setLoading] = useState(false);
@@ -460,13 +464,19 @@
                 return daysSince <= 7;
             };
 
-            const quickSearchByCategory = async (categoryName) => {
+            const quickSearchByCategory = async (categoryName, offset = 0, append = false) => {
                 if (!selectedPeriod) return;
                 
                 setLoading(true);
                 setError(null);
-                setFilters({...filters, category: categoryName, keywords: ''});
-                setSearchMode('keywords');
+                
+                // If it's a new search (not loading more), reset offset and category
+                if (!append) {
+                    setSearchOffset(0);
+                    setCurrentSearchCategory(categoryName);
+                    setFilters({...filters, category: categoryName, keywords: ''});
+                    setSearchMode('keywords');
+                }
                 
                 try {
                     // Search with empty keyword to get all items in the category
@@ -474,11 +484,14 @@
                         Keyword: '', // Empty keyword gets everything
                         CategoryId: 0,
                         CouncilPeriodId: selectedPeriod.councilPeriodId,
-                        RowLimit: 100, // Get more results
-                        OffSet: 0
+                        RowLimit: 100, // Get 100 at a time
+                        OffSet: offset
                     });
                     
-                    console.log(`Quick search returned ${results?.length || 0} items`);
+                    console.log(`Quick search returned ${results?.length || 0} items at offset ${offset}`);
+                    
+                    // Check if we got less than 100 results (means we're at the end)
+                    setHasMoreResults(results && results.length === 100);
                     
                     const legislation = Array.isArray(results) ? results : [];
                     const allLegislation = [];
@@ -525,33 +538,47 @@
                         ? transformedItems.filter(item => item.category === categoryName)
                         : transformedItems;
 
-                    // Keep existing tracked items and merge with new results
-                    const existingTrackedItems = items.filter(item => 
-                        selectedItems.has(item.id) && 
-                        !allLegislation.some(leg => leg.legislationNumber === item.id)
-                    );
-                    
-                    const mergedItems = filteredByCategory.map(item => {
-                        if (selectedItems.has(item.id)) {
-                            const existing = items.find(i => i.id === item.id);
-                            if (existing) {
-                                return {
-                                    ...item,
-                                    assignedTo: existing.assignedTo,
-                                    priority: existing.priority,
-                                    actionStatus: existing.actionStatus
-                                };
+                    if (append) {
+                        // Append to existing results, avoiding duplicates
+                        const existingIds = new Set(items.map(i => i.id));
+                        const newItems = filteredByCategory.filter(item => !existingIds.has(item.id));
+                        setItems([...items, ...newItems]);
+                    } else {
+                        // New search - keep existing tracked items and merge with new results
+                        const existingTrackedItems = items.filter(item => 
+                            selectedItems.has(item.id) && 
+                            !allLegislation.some(leg => leg.legislationNumber === item.id)
+                        );
+                        
+                        const mergedItems = filteredByCategory.map(item => {
+                            if (selectedItems.has(item.id)) {
+                                const existing = items.find(i => i.id === item.id);
+                                if (existing) {
+                                    return {
+                                        ...item,
+                                        assignedTo: existing.assignedTo,
+                                        priority: existing.priority,
+                                        actionStatus: existing.actionStatus
+                                    };
+                                }
                             }
-                        }
-                        return item;
-                    });
+                            return item;
+                        });
 
-                    setItems([...existingTrackedItems, ...mergedItems]);
+                        setItems([...existingTrackedItems, ...mergedItems]);
+                    }
+                    
                     setLoading(false);
                 } catch (err) {
                     setError('Failed to search: ' + err.message);
                     setLoading(false);
                 }
+            };
+
+            const loadMoreResults = () => {
+                const newOffset = searchOffset + 100;
+                setSearchOffset(newOffset);
+                quickSearchByCategory(currentSearchCategory, newOffset, true);
             };
 
             const toggleSelection = async (itemId) => {
@@ -1377,7 +1404,10 @@
                 // Hide tracked items filter
                 const matchesHideTracked = !filters.hideTrackedItems || !selectedItems.has(item.id);
                 
-                return matchesKeyword && matchesCommittee && matchesCategory && matchesAssignedTo && matchesPriority && matchesActionStatus && matchesIntroducedBy && matchesHideTracked;
+                // Upcoming hearing filter - check if hearing date is in the future
+                const matchesUpcomingHearing = !filters.hasUpcomingHearing || (item.hearingDate && new Date(item.hearingDate) > new Date());
+                
+                return matchesKeyword && matchesCommittee && matchesCategory && matchesAssignedTo && matchesPriority && matchesActionStatus && matchesIntroducedBy && matchesHideTracked && matchesUpcomingHearing;
             });
 
             const categories = ['all', ...new Set(items.map(i => i.category).filter(Boolean))];
@@ -1772,7 +1802,7 @@
                                             </select>
                                         </div>
                                         <div className="pt-4 border-t">
-                                            <label className="flex items-center cursor-pointer">
+                                            <label className="flex items-center cursor-pointer mb-3">
                                                 <input
                                                     type="checkbox"
                                                     checked={filters.hideTrackedItems}
@@ -1781,8 +1811,20 @@
                                                 />
                                                 <span className="text-sm font-medium">Hide all tracked items</span>
                                             </label>
-                                            <p className="text-xs text-gray-500 mt-1 ml-6">
+                                            <p className="text-xs text-gray-500 ml-6 mb-3">
                                                 Hide items marked as Action Needed, Monitor & Assess, or Action Completed
+                                            </p>
+                                            <label className="flex items-center cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={filters.hasUpcomingHearing}
+                                                    onChange={(e) => setFilters({...filters, hasUpcomingHearing: e.target.checked})}
+                                                    className="mr-2"
+                                                />
+                                                <span className="text-sm font-medium">Show only items with upcoming hearings</span>
+                                            </label>
+                                            <p className="text-xs text-gray-500 mt-1 ml-6">
+                                                Filter to bills/resolutions with scheduled hearings
                                             </p>
                                         </div>
                                     </div>
@@ -1827,6 +1869,11 @@
                                                             {item.isNew && (
                                                                 <span className="px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded">
                                                                     NEW
+                                                                </span>
+                                                            )}
+                                                            {item.hearingDate && new Date(item.hearingDate) > new Date() && (
+                                                                <span className="px-2 py-0.5 bg-yellow-500 text-white text-xs font-bold rounded">
+                                                                    📅 HEARING {new Date(item.hearingDate).toLocaleDateString()}
                                                                 </span>
                                                             )}
                                                             {item.hasNewActivity && selectedItems.has(item.id) && (
@@ -2007,6 +2054,26 @@
                                             </div>
                                         ))}
                                     </div>
+                                    
+                                    {!loading && currentSearchCategory && hasMoreResults && filteredItems.length > 0 && (
+                                        <div className="mt-6 text-center">
+                                            <button
+                                                onClick={loadMoreResults}
+                                                className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium"
+                                            >
+                                                Load More Results
+                                            </button>
+                                            <p className="text-xs text-gray-500 mt-2">
+                                                Showing {filteredItems.length} results. Click to load 100 more.
+                                            </p>
+                                        </div>
+                                    )}
+                                    
+                                    {!loading && currentSearchCategory && !hasMoreResults && filteredItems.length > 0 && (
+                                        <div className="mt-6 text-center text-sm text-gray-500">
+                                            All results loaded ({filteredItems.length} total)
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
