@@ -460,6 +460,100 @@
                 return daysSince <= 7;
             };
 
+            const quickSearchByCategory = async (categoryName) => {
+                if (!selectedPeriod) return;
+                
+                setLoading(true);
+                setError(null);
+                setFilters({...filters, category: categoryName, keywords: ''});
+                setSearchMode('keywords');
+                
+                try {
+                    // Search with empty keyword to get all items in the category
+                    const results = await proxyFetch('/SearchLegislation', 'POST', {
+                        Keyword: '', // Empty keyword gets everything
+                        CategoryId: 0,
+                        CouncilPeriodId: selectedPeriod.councilPeriodId,
+                        RowLimit: 100, // Get more results
+                        OffSet: 0
+                    });
+                    
+                    console.log(`Quick search returned ${results?.length || 0} items`);
+                    
+                    const legislation = Array.isArray(results) ? results : [];
+                    const allLegislation = [];
+                    const seenIds = new Set();
+                    
+                    legislation.forEach(leg => {
+                        if (leg && leg.legislationNumber && !seenIds.has(leg.legislationNumber)) {
+                            seenIds.add(leg.legislationNumber);
+                            allLegislation.push(leg);
+                        }
+                    });
+
+                    const transformedItems = allLegislation.map(leg => {
+                        const committeeStr = leg.referredToCommittees;
+                        let committees = [];
+                        
+                        if (committeeStr && committeeStr !== 'null' && typeof committeeStr === 'string' && committeeStr.trim()) {
+                            committees = [committeeStr];
+                        }
+                        
+                        const introducedBy = leg.introducedBy || leg.primarySponsor || leg.introducers || leg.sponsor || null;
+                        
+                        return {
+                            id: leg.legislationNumber,
+                            title: leg.title,
+                            billNumber: leg.legislationNumber,
+                            category: leg.category || leg.subCategory || 'Uncategorized',
+                            status: leg.status || 'Unknown',
+                            committees: committees,
+                            date: leg.introductionDate ? new Date(leg.introductionDate).toISOString().split('T')[0] : '',
+                            description: leg.shortDescription || leg.title,
+                            link: `https://lims.dccouncil.gov/Legislation/${leg.legislationNumber}`,
+                            source: 'DC Council',
+                            isNew: isNewItem(leg.introductionDate),
+                            assignedTo: null,
+                            priority: null,
+                            actionStatus: 'action_needed',
+                            introducedBy: introducedBy
+                        };
+                    });
+
+                    // Filter by category if specified
+                    const filteredByCategory = categoryName !== 'all' 
+                        ? transformedItems.filter(item => item.category === categoryName)
+                        : transformedItems;
+
+                    // Keep existing tracked items and merge with new results
+                    const existingTrackedItems = items.filter(item => 
+                        selectedItems.has(item.id) && 
+                        !allLegislation.some(leg => leg.legislationNumber === item.id)
+                    );
+                    
+                    const mergedItems = filteredByCategory.map(item => {
+                        if (selectedItems.has(item.id)) {
+                            const existing = items.find(i => i.id === item.id);
+                            if (existing) {
+                                return {
+                                    ...item,
+                                    assignedTo: existing.assignedTo,
+                                    priority: existing.priority,
+                                    actionStatus: existing.actionStatus
+                                };
+                            }
+                        }
+                        return item;
+                    });
+
+                    setItems([...existingTrackedItems, ...mergedItems]);
+                    setLoading(false);
+                } catch (err) {
+                    setError('Failed to search: ' + err.message);
+                    setLoading(false);
+                }
+            };
+
             const toggleSelection = async (itemId) => {
                 const item = items.find(i => i.id === itemId);
                 if (!item) return;
@@ -1424,46 +1518,32 @@
                                             Quick Search:
                                         </div>
                                         <button
-                                            onClick={() => {
-                                                setFilters({...filters, category: 'Bill', keywords: ''});
-                                                setSearchMode('keywords');
-                                                setTimeout(() => refreshData(), 200);
-                                            }}
+                                            onClick={() => quickSearchByCategory('Bill')}
                                             disabled={loading}
                                             className="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 font-medium disabled:opacity-50"
                                         >
                                             Latest Bills
                                         </button>
                                         <button
-                                            onClick={() => {
-                                                setFilters({...filters, category: 'Resolution', keywords: ''});
-                                                setSearchMode('keywords');
-                                                setTimeout(() => refreshData(), 200);
-                                            }}
+                                            onClick={() => quickSearchByCategory('Resolution')}
                                             disabled={loading}
                                             className="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 font-medium disabled:opacity-50"
                                         >
                                             Latest Resolutions
                                         </button>
                                         <button
-                                            onClick={() => {
-                                                setFilters({...filters, category: 'Act', keywords: ''});
-                                                setSearchMode('keywords');
-                                                setTimeout(() => refreshData(), 200);
-                                            }}
+                                            onClick={() => quickSearchByCategory('Act')}
                                             disabled={loading}
                                             className="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 font-medium disabled:opacity-50"
                                         >
                                             Latest Acts
                                         </button>
                                         <button
-                                            onClick={() => {
-                                                setFilters({...filters, category: 'all', keywords: ''});
-                                                setSearchMode('all');
-                                            }}
-                                            className="px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 font-medium"
+                                            onClick={() => quickSearchByCategory('all')}
+                                            disabled={loading}
+                                            className="px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 font-medium disabled:opacity-50"
                                         >
-                                            Clear Search
+                                            All Legislation
                                         </button>
                                     </div>
                                 </div>
