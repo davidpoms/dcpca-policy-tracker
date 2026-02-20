@@ -322,24 +322,41 @@
 
                     // Search by sponsors (only if search mode allows)
                     // Note: The API's Keyword parameter searches titles, not sponsors
-                    // So we need to fetch broader results and filter more strictly
+                    // So we need to fetch ALL legislation and filter by sponsor field
                     if ((searchMode === 'all' || searchMode === 'sponsors') && trackedSponsors.length > 0) {
                         const sponsorPromises = trackedSponsors.map(async sponsor => {
                             try {
-                                // Fetch recent legislation without keyword filter
-                                // We'll filter by sponsor on the client side
-                                const results = await proxyFetch('/SearchLegislation', 'POST', {
-                                    Keyword: '', // Empty keyword to get all recent legislation
-                                    CategoryId: 0,
-                                    CouncilPeriodId: selectedPeriod.councilPeriodId,
-                                    RowLimit: 100, // Get more results since we're filtering client-side
-                                    OffSet: 0
-                                });
+                                // Fetch ALL legislation by making multiple paginated requests
+                                let allLegislation = [];
+                                let offset = 0;
+                                const limit = 100;
+                                let hasMore = true;
                                 
-                                console.log(`Fetched ${results?.length || 0} total bills to filter for sponsor "${sponsor}"`);
+                                console.log(`Fetching all legislation to find bills by "${sponsor}"...`);
+                                
+                                while (hasMore) {
+                                    const results = await proxyFetch('/SearchLegislation', 'POST', {
+                                        Keyword: '', // Empty keyword to get all legislation
+                                        CategoryId: 0,
+                                        CouncilPeriodId: selectedPeriod.councilPeriodId,
+                                        RowLimit: limit,
+                                        OffSet: offset
+                                    });
+                                    
+                                    if (results && results.length > 0) {
+                                        allLegislation = allLegislation.concat(results);
+                                        offset += limit;
+                                        hasMore = results.length === limit; // Continue if we got a full page
+                                        console.log(`Fetched ${allLegislation.length} bills so far...`);
+                                    } else {
+                                        hasMore = false;
+                                    }
+                                }
+                                
+                                console.log(`Total bills fetched: ${allLegislation.length}`);
                                 
                                 // Now filter strictly by sponsor fields only
-                                const filtered = Array.isArray(results) ? results.filter(leg => {
+                                const filtered = allLegislation.filter(leg => {
                                     // Check all possible sponsor fields - but NOT the title
                                     const introducedBy = leg.introducedBy || '';
                                     const primarySponsor = leg.primarySponsor || '';
@@ -364,7 +381,7 @@
                                     }
                                     
                                     return matches;
-                                }) : [];
+                                });
                                 
                                 console.log(`Found ${filtered.length} bills introduced by "${sponsor}"`);
                                 return filtered;
