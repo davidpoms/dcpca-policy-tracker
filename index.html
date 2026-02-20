@@ -1424,32 +1424,35 @@
                                             Quick Search:
                                         </div>
                                         <button
-                                            onClick={async () => {
+                                            onClick={() => {
                                                 setFilters({...filters, category: 'Bill', keywords: ''});
                                                 setSearchMode('keywords');
-                                                await refreshData();
+                                                setTimeout(() => refreshData(), 200);
                                             }}
-                                            className="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 font-medium"
+                                            disabled={loading}
+                                            className="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 font-medium disabled:opacity-50"
                                         >
                                             Latest Bills
                                         </button>
                                         <button
-                                            onClick={async () => {
+                                            onClick={() => {
                                                 setFilters({...filters, category: 'Resolution', keywords: ''});
                                                 setSearchMode('keywords');
-                                                await refreshData();
+                                                setTimeout(() => refreshData(), 200);
                                             }}
-                                            className="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 font-medium"
+                                            disabled={loading}
+                                            className="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 font-medium disabled:opacity-50"
                                         >
                                             Latest Resolutions
                                         </button>
                                         <button
-                                            onClick={async () => {
+                                            onClick={() => {
                                                 setFilters({...filters, category: 'Act', keywords: ''});
                                                 setSearchMode('keywords');
-                                                await refreshData();
+                                                setTimeout(() => refreshData(), 200);
                                             }}
-                                            className="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 font-medium"
+                                            disabled={loading}
+                                            className="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 font-medium disabled:opacity-50"
                                         >
                                             Latest Acts
                                         </button>
