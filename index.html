@@ -1381,40 +1381,86 @@
                             )}
 
                             {selectedPeriod && (
-                                <div className="text-sm text-gray-600 flex items-center justify-between">
-                                    <div>
-                                        Council Period: <strong>{selectedPeriod.councilPeriod}</strong>
-                                        {selectedItems.size > 0 && <span className="ml-2 px-2 py-1 bg-indigo-100 text-indigo-700 rounded">{selectedItems.size} items tracked</span>}
-                                        {items.filter(i => i.hasNewActivity && selectedItems.has(i.id)).length > 0 && (
-                                            <span className="ml-2 px-2 py-1 bg-orange-500 text-white rounded animate-pulse">
-                                                🔔 {items.filter(i => i.hasNewActivity && selectedItems.has(i.id)).length} with new activity
-                                            </span>
-                                        )}
+                                <div className="mb-4">
+                                    <div className="text-sm text-gray-600 flex items-center justify-between mb-3">
+                                        <div>
+                                            Council Period: <strong>{selectedPeriod.councilPeriod}</strong>
+                                            {selectedItems.size > 0 && <span className="ml-2 px-2 py-1 bg-indigo-100 text-indigo-700 rounded">{selectedItems.size} items tracked</span>}
+                                            {items.filter(i => i.hasNewActivity && selectedItems.has(i.id)).length > 0 && (
+                                                <span className="ml-2 px-2 py-1 bg-orange-500 text-white rounded animate-pulse">
+                                                    🔔 {items.filter(i => i.hasNewActivity && selectedItems.has(i.id)).length} with new activity
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => setFilters({...filters, actionStatus: 'action_needed'})}
+                                                className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
+                                            >
+                                                Show Action Needed
+                                            </button>
+                                            <button
+                                                onClick={() => setFilters({...filters, actionStatus: 'monitor_and_assess'})}
+                                                className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                                            >
+                                                Show Monitor & Assess
+                                            </button>
+                                            <button
+                                                onClick={() => setFilters({...filters, actionStatus: 'action_completed'})}
+                                                className="px-3 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200"
+                                            >
+                                                Show Completed
+                                            </button>
+                                            <button
+                                                onClick={() => setFilters({...filters, actionStatus: 'all'})}
+                                                className="px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                                            >
+                                                Show All
+                                            </button>
+                                        </div>
                                     </div>
-                                    <div className="flex gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <div className="text-sm font-semibold text-gray-700">
+                                            Quick Search:
+                                        </div>
                                         <button
-                                            onClick={() => setFilters({...filters, actionStatus: 'action_needed'})}
-                                            className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
+                                            onClick={async () => {
+                                                setFilters({...filters, category: 'Bill', keywords: ''});
+                                                setSearchMode('keywords');
+                                                await refreshData();
+                                            }}
+                                            className="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 font-medium"
                                         >
-                                            Show Action Needed
+                                            Latest Bills
                                         </button>
                                         <button
-                                            onClick={() => setFilters({...filters, actionStatus: 'monitor_and_assess'})}
-                                            className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                                            onClick={async () => {
+                                                setFilters({...filters, category: 'Resolution', keywords: ''});
+                                                setSearchMode('keywords');
+                                                await refreshData();
+                                            }}
+                                            className="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 font-medium"
                                         >
-                                            Show Monitor & Assess
+                                            Latest Resolutions
                                         </button>
                                         <button
-                                            onClick={() => setFilters({...filters, actionStatus: 'action_completed'})}
-                                            className="px-3 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200"
+                                            onClick={async () => {
+                                                setFilters({...filters, category: 'Act', keywords: ''});
+                                                setSearchMode('keywords');
+                                                await refreshData();
+                                            }}
+                                            className="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 font-medium"
                                         >
-                                            Show Completed
+                                            Latest Acts
                                         </button>
                                         <button
-                                            onClick={() => setFilters({...filters, actionStatus: 'all'})}
-                                            className="px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                                            onClick={() => {
+                                                setFilters({...filters, category: 'all', keywords: ''});
+                                                setSearchMode('all');
+                                            }}
+                                            className="px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 font-medium"
                                         >
-                                            Show All
+                                            Clear Search
                                         </button>
                                     </div>
                                 </div>
