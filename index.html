@@ -328,9 +328,9 @@
                             try {
                                 console.log(`Fetching bulk data to find bills by "${sponsor}"...`);
                                 
-                                // Use BulkData endpoint which includes full legislation details
-                                // CategoryId: 0 = all categories
-                                const bulkData = await proxyFetch('/BulkData/0/' + selectedPeriod.councilPeriodId);
+                                // Use BulkData endpoint - POST with categoryId and councilPeriodId in path
+                                const endpoint = `/BulkData/${0}/${selectedPeriod.councilPeriodId}`;
+                                const bulkData = await proxyFetch(endpoint, 'POST', null);
                                 
                                 console.log(`BulkData returned ${bulkData?.length || 0} bills`);
                                 
@@ -384,6 +384,8 @@
                                 return filtered;
                             } catch (err) {
                                 console.error(`Error searching for sponsor "${sponsor}":`, err);
+                                console.warn('⚠️ BulkData endpoint failed. Sponsor search is currently unavailable.');
+                                console.warn('For accurate sponsor searches, please use: https://lims.dccouncil.gov/voteSearch');
                                 return [];
                             }
                         });
