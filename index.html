@@ -31,7 +31,8 @@
                 assignedTo: 'all',
                 priority: 'all',
                 actionStatus: 'all',
-                introducedBy: 'all'
+                introducedBy: 'all',
+                hideTrackedItems: false
             });
             const [selectedItems, setSelectedItems] = useState(new Set());
             const [itemNotes, setItemNotes] = useState({});
@@ -1324,7 +1325,11 @@
                     (selectedItems.has(item.id) && item.actionStatus === filters.actionStatus);
                 
                 const matchesIntroducedBy = filters.introducedBy === 'all' || item.introducedBy === filters.introducedBy;
-                return matchesKeyword && matchesCommittee && matchesCategory && matchesAssignedTo && matchesPriority && matchesActionStatus && matchesIntroducedBy;
+                
+                // Hide tracked items filter
+                const matchesHideTracked = !filters.hideTrackedItems || !selectedItems.has(item.id);
+                
+                return matchesKeyword && matchesCommittee && matchesCategory && matchesAssignedTo && matchesPriority && matchesActionStatus && matchesIntroducedBy && matchesHideTracked;
             });
 
             const categories = ['all', ...new Set(items.map(i => i.category).filter(Boolean))];
@@ -1574,9 +1579,6 @@
                                             + Add
                                         </button>
                                     </div>
-                                    <div className="mb-3 p-2 bg-yellow-50 border border-yellow-300 rounded text-xs text-yellow-800">
-                                        ⚠️ <strong>Limited functionality:</strong> The DC Council API doesn't include sponsor data. For accurate sponsor searches, use <a href="https://lims.dccouncil.gov/voteSearch" target="_blank" className="underline">lims.dccouncil.gov/voteSearch</a>
-                                    </div>
                                     <div className="space-y-2">
                                         {trackedSponsors.map(sponsor => (
                                             <div key={sponsor} className="flex items-center justify-between p-2 bg-purple-50 rounded">
@@ -1678,6 +1680,20 @@
                                                     </option>
                                                 ))}
                                             </select>
+                                        </div>
+                                        <div className="pt-4 border-t">
+                                            <label className="flex items-center cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={filters.hideTrackedItems}
+                                                    onChange={(e) => setFilters({...filters, hideTrackedItems: e.target.checked})}
+                                                    className="mr-2"
+                                                />
+                                                <span className="text-sm font-medium">Hide all tracked items</span>
+                                            </label>
+                                            <p className="text-xs text-gray-500 mt-1 ml-6">
+                                                Hide items marked as Action Needed, Monitor & Assess, or Action Completed
+                                            </p>
                                         </div>
                                     </div>
                                 </div>
