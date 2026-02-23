@@ -92,7 +92,9 @@ export default async function handler(req, res) {
                 </tr>
                 ${item.introduced_by ? `<tr><td style="padding: 2px 8px 2px 0; color: #6b7280;">Sponsor</td><td colspan="3" style="padding: 2px 0; color: #374151;">${item.introduced_by}</td></tr>` : ''}
                 ${hearing ? `<tr><td style="padding: 4px 8px 2px 0; color: #d97706; font-weight: 600;">📅 Hearing</td><td colspan="3" style="padding: 4px 0; color: #d97706; font-weight: 600;">${formatDate(item.next_hearing_date)}${item.hearing_location ? ' — ' + item.hearing_location : ''}</td></tr>` : ''}
+                ${item.committee_re_referral && item.committee_re_referral.length > 0 ? `<tr><td style="padding: 4px 8px 2px 0; color: #c2410c; font-weight: 600;">🔁 Re-referred</td><td colspan="3" style="padding: 4px 0; color: #c2410c;">${item.committee_re_referral.map(r => r.fromCommittee && r.toCommittee ? `${r.fromCommittee} → ${r.toCommittee}` : (r.committee || r.toCommittee || '')).join('; ')}</td></tr>` : ''}
                 ${note ? `<tr><td style="padding: 4px 8px 2px 0; color: #6b7280; vertical-align: top;">Note</td><td colspan="3" style="padding: 4px 0; color: #374151; font-style: italic;">${note}</td></tr>` : ''}
+                ${item.additional_information ? `<tr><td style="padding: 4px 8px 2px 0; color: #6b7280; vertical-align: top;">Summary</td><td colspan="3" style="padding: 4px 0; color: #374151; font-size: 11px;">${item.additional_information.substring(0, 400)}${item.additional_information.length > 400 ? '…' : ''}</td></tr>` : ''}
             </table>
         </div>`;
     };
