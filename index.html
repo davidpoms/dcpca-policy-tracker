@@ -100,52 +100,53 @@
         function extractLatestActivityDate(details) {
             const candidates = [];
 
-            const add = (val) => {
+            const add = (val, label) => {
                 if (!val) return;
                 const d = new Date(val);
-                if (!isNaN(d) && d.getFullYear() > 2000) candidates.push(d);
+                if (!isNaN(d) && d.getFullYear() > 2000) candidates.push({ date: d, label });
             };
 
-            // Congressional review (most recent for enacted bills)
+            // Congressional review
             if (details.congressionalReview) {
-                add(details.congressionalReview.effectiveDate);
-                add(details.congressionalReview.lawPublicationDate);
-                add(details.congressionalReview.transmittedDate);
+                add(details.congressionalReview.effectiveDate, 'Effective Date (Law)');
+                add(details.congressionalReview.lawPublicationDate, 'Law Published');
+                add(details.congressionalReview.transmittedDate, 'Transmitted to Congress');
             }
 
             // Mayoral review
             if (details.mayoralReview) {
-                add(details.mayoralReview.enactedDate);
-                add(details.mayoralReview.signedDate);
-                add(details.mayoralReview.returnedDate);
-                add(details.mayoralReview.actPublicationDate);
-                add(details.mayoralReview.transmittedDate);
+                add(details.mayoralReview.enactedDate, 'Enacted');
+                add(details.mayoralReview.signedDate, 'Signed by Mayor');
+                add(details.mayoralReview.returnedDate, 'Returned by Mayor');
+                add(details.mayoralReview.actPublicationDate, 'Act Published');
+                add(details.mayoralReview.transmittedDate, 'Transmitted to Mayor');
             }
 
             // Council actions (votes)
-            (details.actions || []).forEach(a => add(a.actionDate));
+            (details.actions || []).forEach(a => add(a.actionDate, a.action?.trim() || 'Council Action'));
 
             // Committee markups
             (details.committeeMarkup || []).forEach(m => {
-                add(m.committeeActionDate);
-                add(m.reportFiledDate);
+                add(m.reportFiledDate, 'Committee Report Filed');
+                add(m.committeeActionDate, 'Committee Markup');
             });
 
             // Past hearings
-            (details.committeeHearing || []).forEach(h => add(h.hearingDate));
-
-            // Re-referrals
-            (details.committeeReReferral || []).forEach(r => {
-                add(r.reReferralDate || r.date);
+            (details.committeeHearing || []).forEach(h => {
+                if (new Date(h.hearingDate) <= new Date()) add(h.hearingDate, h.hearingType || 'Committee Hearing');
             });
 
+            // Re-referrals
+            (details.committeeReReferral || []).forEach(r => add(r.reReferralDate || r.date, 'Committee Re-Referral'));
+
             // Introduction dates as floor
-            add(details.introductionPublicationDate);
-            add(details.introductionDate);
+            add(details.introductionPublicationDate, 'Introduction Published');
+            add(details.introductionDate, 'Introduced');
 
             if (!candidates.length) return null;
-            candidates.sort((a, b) => b - a);
-            return candidates[0].toISOString();
+            candidates.sort((a, b) => b.date - a.date);
+            const best = candidates[0];
+            return { date: best.date, dateIso: best.date.toISOString(), label: best.label };
         }
             const [items, setItems] = useState([]);
             const [filters, setFilters] = useState({
@@ -243,6 +244,7 @@
                             additionalInformation: item.additional_information || null,
                             committeeReReferral: item.committee_re_referral || [],
                             latestActivityDate: item.latest_activity_date || item.date || null,
+                            latestActivityLabel: item.latest_activity_label || null,
                             activityCount: item.activity_count || 0,
                             deadline: item.deadline || null
                         }));
@@ -382,8 +384,9 @@
                             let activityCount = currentItem?.activityCount || 0;
                             if (details.status && currentItem?.lastStatus && details.status !== currentItem.lastStatus) activityCount++;
                             if (reReferrals.length > (currentItem?.committeeReReferral?.length || 0)) activityCount++;
-                            const latestActivityDate = extractLatestActivityDate(details)
-                                || currentItem?.latestActivityDate || null;
+                            const latestActivity = extractLatestActivityDate(details);
+                            const latestActivityDate = latestActivity?.dateIso || currentItem?.latestActivityDate || null;
+                            const latestActivityLabel = latestActivity?.label || currentItem?.latestActivityLabel || null;
 
                             newHearingData[id] = { ...hearing, checkedAt: now };
                             await supabase.from('tracked_items').update({
@@ -394,6 +397,7 @@
                                 additional_information: details.additionalInformation || null,
                                 committee_re_referral: reReferrals.length > 0 ? reReferrals : null,
                                 latest_activity_date: latestActivityDate,
+                                latest_activity_label: latestActivityLabel,
                                 activity_count: activityCount,
                                 ...(details.status ? { status: details.status } : {})
                             }).eq('id', id);
@@ -403,6 +407,7 @@
                                 additionalInformation: details.additionalInformation || i.additionalInformation,
                                 committeeReReferral: reReferrals,
                                 latestActivityDate: latestActivityDate,
+                                latestActivityLabel: latestActivityLabel,
                                 activityCount: activityCount,
                                 status: details.status || i.status
                             } : i));
@@ -432,8 +437,9 @@
                     let activityCount = currentItem?.activityCount || 0;
                     if (details.status && currentItem?.lastStatus && details.status !== currentItem.lastStatus) activityCount++;
                     if (reReferrals.length > (currentItem?.committeeReReferral?.length || 0)) activityCount++;
-                    const latestActivityDate = extractLatestActivityDate(details)
-                        || currentItem?.latestActivityDate || null;
+                    const latestActivity = extractLatestActivityDate(details);
+                    const latestActivityDate = latestActivity?.dateIso || currentItem?.latestActivityDate || null;
+                    const latestActivityLabel = latestActivity?.label || currentItem?.latestActivityLabel || null;
 
                     setHearingData(prev => ({ ...prev, [itemId]: { ...hearing, checkedAt: now } }));
                     setItems(prev => prev.map(i => i.id === itemId ? {
@@ -441,6 +447,7 @@
                         additionalInformation: details.additionalInformation || i.additionalInformation,
                         committeeReReferral: reReferrals,
                         latestActivityDate: latestActivityDate,
+                        latestActivityLabel: latestActivityLabel,
                         activityCount: activityCount,
                         status: details.status || i.status
                     } : i));
@@ -452,6 +459,7 @@
                         additional_information: details.additionalInformation || null,
                         committee_re_referral: reReferrals.length > 0 ? reReferrals : null,
                         latest_activity_date: latestActivityDate,
+                        latest_activity_label: latestActivityLabel,
                         activity_count: activityCount,
                         ...(details.status ? { status: details.status } : {})
                     }).eq('id', itemId);
@@ -984,6 +992,7 @@
                         emailBody += `   Bill Number: ${item.billNumber || 'N/A'}\n   Category: ${item.category}\n   Status: ${item.status}\n`;
                         emailBody += `   Assigned To: ${item.assignedTo || 'Unassigned'}\n   Priority: ${item.priority || 'N/A'}\n`;
                         if (item.introducedBy) emailBody += `   Introduced By: ${item.introducedBy}\n`;
+                        if (item.latestActivityDate && item.latestActivityLabel) emailBody += `   Latest Activity: ${item.latestActivityLabel} (${new Date(item.latestActivityDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })})\n`;
                         if (hearingData[item.id]?.date && !hearingData[item.id]?.isPast) emailBody += `   Hearing: ${hearingData[item.id].dateStr}\n`;
                         if (item.additionalInformation) emailBody += `   Summary: ${item.additionalInformation.substring(0, 300)}${item.additionalInformation.length > 300 ? '...' : ''}\n`;
                         if (itemNotes[item.id]) emailBody += `   Notes: ${itemNotes[item.id]}\n`;
@@ -998,6 +1007,7 @@
                         emailBody += `   Bill Number: ${item.billNumber || 'N/A'}\n   Category: ${item.category}\n   Status: ${item.status}\n`;
                         emailBody += `   Assigned To: ${item.assignedTo || 'Unassigned'}\n   Priority: ${item.priority || 'N/A'}\n`;
                         if (item.introducedBy) emailBody += `   Introduced By: ${item.introducedBy}\n`;
+                        if (item.latestActivityDate && item.latestActivityLabel) emailBody += `   Latest Activity: ${item.latestActivityLabel} (${new Date(item.latestActivityDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })})\n`;
                         if (hearingData[item.id]?.date && !hearingData[item.id]?.isPast) emailBody += `   Hearing: ${hearingData[item.id].dateStr}\n`;
                         if (item.additionalInformation) emailBody += `   Summary: ${item.additionalInformation.substring(0, 300)}${item.additionalInformation.length > 300 ? '...' : ''}\n`;
                         if (itemNotes[item.id]) emailBody += `   Notes: ${itemNotes[item.id]}\n`;
@@ -1389,7 +1399,9 @@
                                                             <div className="text-xs text-gray-500 mb-2">
                                                                 <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{item.billNumber || item.id}</a>
                                                                 {item.introducedBy && <span className="ml-2">• Introduced by: {item.introducedBy}</span>}
-                                                                {latestActivityStr && <span className="ml-2">• Latest activity: {latestActivityStr}</span>}
+                                                                {latestActivityStr && (
+                                                                    <span className="ml-2">• {item.latestActivityLabel ? `${item.latestActivityLabel}: ${latestActivityStr}` : `Latest activity: ${latestActivityStr}`}</span>
+                                                                )}
                                                                 {hearing?.checkedAt && <span className="ml-2 text-gray-400">• Checked {new Date(hearing.checkedAt).toLocaleDateString()}</span>}
                                                             </div>
                                                             <p className="text-sm text-gray-600 mb-2">{item.description}</p>
