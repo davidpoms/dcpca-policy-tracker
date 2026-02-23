@@ -69,6 +69,7 @@ export default async function handler(req, res) {
                 <tr>
                     <th style="${thStyle}">Bill / Title</th>
                     <th style="${thStyle}">Status</th>
+                    <th style="${thStyle}">Last Activity</th>
                     <th style="${thStyle}">Assigned To</th>
                     ${showHearing ? `<th style="${thStyle}">Hearing</th>` : ''}
                 </tr>
@@ -76,6 +77,9 @@ export default async function handler(req, res) {
             <tbody>
                 ${sectionItems.map((item, idx) => {
                     const hearing = item.next_hearing_date && new Date(item.next_hearing_date) > now;
+                    const activityStr = item.latest_activity_date && item.latest_activity_label
+                        ? `${item.latest_activity_label}<br><span style="color:#9ca3af">${formatDate(item.latest_activity_date)}</span>`
+                        : item.latest_activity_date ? formatDate(item.latest_activity_date) : '—';
                     return `
                     <tr style="background: ${idx % 2 === 0 ? 'white' : '#fafafa'}">
                         <td style="${rowStyle}">
@@ -83,6 +87,7 @@ export default async function handler(req, res) {
                             <div style="font-size: 12px; color: #374151; margin-top: 2px;">${item.title}</div>
                         </td>
                         <td style="${rowStyle} color: #374151;">${item.status || '—'}</td>
+                        <td style="${rowStyle} color: #374151; font-size: 12px;">${activityStr}</td>
                         <td style="${rowStyle} color: #374151;">${item.assigned_to || 'Unassigned'}</td>
                         ${showHearing ? `<td style="${rowStyle} ${hearing ? 'color: #d97706; font-weight: 600;' : 'color: #9ca3af;'}">${hearing ? `📅 ${formatDate(item.next_hearing_date)}` : '—'}</td>` : ''}
                     </tr>`;
