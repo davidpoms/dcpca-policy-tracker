@@ -490,36 +490,41 @@
                 setLoading(true);
                 setError(null);
                 try {
-                    let allPromises = [];
+                    const allResults = [];
+                    const delay = ms => new Promise(r => setTimeout(r, ms));
+
                     if ((searchMode === 'all' || searchMode === 'keywords') && trackedKeywords.length > 0) {
-                        const keywordPromises = trackedKeywords.map(keyword =>
-                            proxyFetch('/SearchLegislation', 'POST', {
-                                Keyword: keyword, CategoryId: 0,
-                                CouncilPeriodId: selectedPeriod.councilPeriodId, RowLimit: 20, OffSet: 0
-                            }).catch(err => { console.error(`Error searching for "${keyword}":`, err); return []; })
-                        );
-                        allPromises.push(...keywordPromises);
+                        for (const keyword of trackedKeywords) {
+                            try {
+                                const result = await proxyFetch('/SearchLegislation', 'POST', {
+                                    Keyword: keyword, CategoryId: 0,
+                                    CouncilPeriodId: selectedPeriod.councilPeriodId, RowLimit: 20, OffSet: 0
+                                });
+                                allResults.push(Array.isArray(result) ? result : []);
+                            } catch (err) { console.error(`Error searching for "${keyword}":`, err); allResults.push([]); }
+                            await delay(1000);
+                        }
                     }
                     if ((searchMode === 'all' || searchMode === 'committees') && trackedCommittees.length > 0) {
-                        const committeePromises = trackedCommittees.map(async committee => {
+                        for (const committee of trackedCommittees) {
                             try {
                                 const results = await proxyFetch('/SearchLegislation', 'POST', {
                                     Keyword: committee, CategoryId: 0,
                                     CouncilPeriodId: selectedPeriod.councilPeriodId, RowLimit: 50, OffSet: 0
                                 });
-                                return Array.isArray(results) ? results.filter(leg => {
+                                allResults.push(Array.isArray(results) ? results.filter(leg => {
                                     const cs = leg.referredToCommittees;
                                     return cs && cs !== 'null' && cs.toLowerCase().includes(committee.toLowerCase());
-                                }) : [];
-                            } catch (err) { console.error(`Error searching committee "${committee}":`, err); return []; }
-                        });
-                        allPromises.push(...committeePromises);
+                                }) : []);
+                            } catch (err) { console.error(`Error searching committee "${committee}":`, err); allResults.push([]); }
+                            await delay(1000);
+                        }
                     }
                     if ((searchMode === 'all' || searchMode === 'sponsors') && trackedSponsors.length > 0) {
-                        allPromises.push(...trackedSponsors.map(() => Promise.resolve([])));
+                        trackedSponsors.forEach(() => allResults.push([]));
                     }
 
-                    const results = await Promise.all(allPromises);
+                    const results = allResults;
                     const allLegislation = [];
                     const seenIds = new Set();
                     results.forEach(result => {
