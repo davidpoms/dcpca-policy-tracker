@@ -143,7 +143,7 @@
                 title: '', agency: '', status: 'Published',
                 date: new Date().toISOString().split('T')[0],
                 link: '', assignedTo: 'Unassigned', priority: 'medium',
-                actionStatus: 'action_needed', noticeId: '', registerIssue: '', registerNotes: ''
+                actionStatus: 'action_needed', noticeId: '', registerIssue: '', registerNotes: '', deadline: ''
             });
 
             // ── Hearing state ─────────────────────────────────────────────────────────
@@ -151,6 +151,10 @@
             const [checkingHearings, setCheckingHearings] = useState(false);
             const [hearingCheckProgress, setHearingCheckProgress] = useState({ done: 0, total: 0 });
             const [showHearingPanel, setShowHearingPanel] = useState(false);
+
+            // ── UI state ──────────────────────────────────────────────────────────────
+            const [expandedInfo, setExpandedInfo] = useState(new Set());
+            const [sortByActivity, setSortByActivity] = useState(false);
 
             const PROXY_URL = 'https://dcpca-policy-tracker.vercel.app/api/hello';
 
@@ -185,7 +189,12 @@
                             noticeId: item.notice_id || null,
                             registerIssue: item.register_issue || null,
                             registerNotes: item.register_notes || null,
-                            isManualEntry: item.is_manual_entry || false
+                            isManualEntry: item.is_manual_entry || false,
+                            additionalInformation: item.additional_information || null,
+                            committeeReReferral: item.committee_re_referral || [],
+                            latestActivityDate: item.latest_activity_date || item.date || null,
+                            activityCount: item.activity_count || 0,
+                            deadline: item.deadline || null
                         }));
                         setItems(displayItems);
 
@@ -318,13 +327,39 @@
                         try {
                             const details = await fetchLegislationDetails(id);
                             const hearing = extractNextHearing(details);
+                            const reReferrals = details.committeeReReferral || [];
+                            const currentItem = items.find(i => i.id === id);
+                            let activityCount = currentItem?.activityCount || 0;
+                            if (details.status && currentItem?.lastStatus && details.status !== currentItem.lastStatus) activityCount++;
+                            if (reReferrals.length > (currentItem?.committeeReReferral?.length || 0)) activityCount++;
+                            const latestReReferralDate = reReferrals.length > 0
+                                ? reReferrals.map(r => new Date(r.reReferralDate || r.date || 0)).sort((a,b) => b-a)[0]
+                                : null;
+                            const latestActivityDate = (latestReReferralDate?.toISOString())
+                                || (hearing.date && !hearing.isPast ? hearing.date.toISOString() : null)
+                                || currentItem?.latestActivityDate || now;
+
                             newHearingData[id] = { ...hearing, checkedAt: now };
                             await supabase.from('tracked_items').update({
                                 hearing_checked_at: now,
                                 next_hearing_date: hearing.date ? hearing.date.toISOString() : null,
                                 hearing_type: hearing.type || null,
-                                hearing_location: hearing.location || null
+                                hearing_location: hearing.location || null,
+                                additional_information: details.additionalInformation || null,
+                                committee_re_referral: reReferrals.length > 0 ? reReferrals : null,
+                                latest_activity_date: latestActivityDate,
+                                activity_count: activityCount,
+                                ...(details.status ? { status: details.status } : {})
                             }).eq('id', id);
+
+                            setItems(prev => prev.map(i => i.id === id ? {
+                                ...i,
+                                additionalInformation: details.additionalInformation || i.additionalInformation,
+                                committeeReReferral: reReferrals,
+                                latestActivityDate: latestActivityDate,
+                                activityCount: activityCount,
+                                status: details.status || i.status
+                            } : i));
                         } catch (err) {
                             console.error(`Error fetching details for ${id}:`, err);
                             newHearingData[id] = { date: null, dateStr: null, type: null, location: null, isPast: null, error: err.message, checkedAt: now };
@@ -346,12 +381,37 @@
                     const details = await fetchLegislationDetails(itemId);
                     const hearing = extractNextHearing(details);
                     const now = new Date().toISOString();
+                    const reReferrals = details.committeeReReferral || [];
+                    const currentItem = items.find(i => i.id === itemId);
+                    let activityCount = currentItem?.activityCount || 0;
+                    if (details.status && currentItem?.lastStatus && details.status !== currentItem.lastStatus) activityCount++;
+                    if (reReferrals.length > (currentItem?.committeeReReferral?.length || 0)) activityCount++;
+                    const latestReReferralDate = reReferrals.length > 0
+                        ? reReferrals.map(r => new Date(r.reReferralDate || r.date || 0)).sort((a,b) => b-a)[0]
+                        : null;
+                    const latestActivityDate = (latestReReferralDate?.toISOString())
+                        || (hearing.date && !hearing.isPast ? hearing.date.toISOString() : null)
+                        || currentItem?.latestActivityDate || now;
+
                     setHearingData(prev => ({ ...prev, [itemId]: { ...hearing, checkedAt: now } }));
+                    setItems(prev => prev.map(i => i.id === itemId ? {
+                        ...i,
+                        additionalInformation: details.additionalInformation || i.additionalInformation,
+                        committeeReReferral: reReferrals,
+                        latestActivityDate: latestActivityDate,
+                        activityCount: activityCount,
+                        status: details.status || i.status
+                    } : i));
                     await supabase.from('tracked_items').update({
                         hearing_checked_at: now,
                         next_hearing_date: hearing.date ? hearing.date.toISOString() : null,
                         hearing_type: hearing.type || null,
-                        hearing_location: hearing.location || null
+                        hearing_location: hearing.location || null,
+                        additional_information: details.additionalInformation || null,
+                        committee_re_referral: reReferrals.length > 0 ? reReferrals : null,
+                        latest_activity_date: latestActivityDate,
+                        activity_count: activityCount,
+                        ...(details.status ? { status: details.status } : {})
                     }).eq('id', itemId);
                 } catch (err) { console.error(`Error checking hearing for ${itemId}:`, err); }
             };
@@ -710,7 +770,7 @@
 
             const addManualEntry = async () => {
                 if (!manualEntry.title.trim()) { alert('Please enter a title'); return; }
-                const blankManual = { title: '', agency: '', status: 'Published', date: new Date().toISOString().split('T')[0], link: '', assignedTo: 'Unassigned', priority: 'medium', actionStatus: 'action_needed', noticeId: '', registerIssue: '', registerNotes: '' };
+                const blankManual = { title: '', agency: '', status: 'Published', date: new Date().toISOString().split('T')[0], link: '', assignedTo: 'Unassigned', priority: 'medium', actionStatus: 'action_needed', noticeId: '', registerIssue: '', registerNotes: '', deadline: '' };
                 const newItem = {
                     id: `MANUAL-${Date.now()}`, title: manualEntry.title, billNumber: null,
                     agency: manualEntry.agency || 'DC Government', category: 'Municipal Regulation',
@@ -719,7 +779,10 @@
                     committees: [], assignedTo: manualEntry.assignedTo, priority: manualEntry.priority,
                     actionStatus: manualEntry.actionStatus, introducedBy: null,
                     noticeId: manualEntry.noticeId, registerIssue: manualEntry.registerIssue,
-                    registerNotes: manualEntry.registerNotes, isManualEntry: true
+                    registerNotes: manualEntry.registerNotes, isManualEntry: true,
+                    deadline: manualEntry.deadline || null,
+                    additionalInformation: null, committeeReReferral: [], activityCount: 0,
+                    latestActivityDate: manualEntry.deadline || manualEntry.date || null
                 };
                 try {
                     const { error } = await supabase.from('tracked_items').insert({
@@ -729,7 +792,10 @@
                         source: newItem.source, agency: newItem.agency, is_manual_entry: true,
                         is_new: newItem.isNew, assigned_to: newItem.assignedTo, priority: newItem.priority,
                         action_status: newItem.actionStatus, introduced_by: null,
-                        notice_id: newItem.noticeId, register_issue: newItem.registerIssue, register_notes: newItem.registerNotes
+                        notice_id: newItem.noticeId, register_issue: newItem.registerIssue,
+                        register_notes: newItem.registerNotes,
+                        deadline: newItem.deadline || null,
+                        latest_activity_date: newItem.latestActivityDate
                     });
                     if (error) throw error;
                     setItems([newItem, ...items]);
@@ -747,20 +813,23 @@
                 setManualEntry({ title: item.title, agency: item.agency || '', status: item.status,
                     date: item.date, link: item.link || '', assignedTo: item.assignedTo, priority: item.priority,
                     actionStatus: item.actionStatus, noticeId: item.noticeId || '',
-                    registerIssue: item.registerIssue || '', registerNotes: item.registerNotes || '' });
+                    registerIssue: item.registerIssue || '', registerNotes: item.registerNotes || '',
+                    deadline: item.deadline || '' });
                 setShowManualEntry(true);
             };
 
             const updateManualEntry = async () => {
                 if (!manualEntry.title.trim()) { alert('Please enter a title'); return; }
-                const blankManual = { title: '', agency: '', status: 'Published', date: new Date().toISOString().split('T')[0], link: '', assignedTo: 'Unassigned', priority: 'medium', actionStatus: 'action_needed', noticeId: '', registerIssue: '', registerNotes: '' };
+                const blankManual = { title: '', agency: '', status: 'Published', date: new Date().toISOString().split('T')[0], link: '', assignedTo: 'Unassigned', priority: 'medium', actionStatus: 'action_needed', noticeId: '', registerIssue: '', registerNotes: '', deadline: '' };
                 try {
                     const { error } = await supabase.from('tracked_items').update({
                         title: manualEntry.title, agency: manualEntry.agency, status: manualEntry.status,
                         date: manualEntry.date, link: manualEntry.link, assigned_to: manualEntry.assignedTo,
                         priority: manualEntry.priority, action_status: manualEntry.actionStatus,
                         notice_id: manualEntry.noticeId, register_issue: manualEntry.registerIssue,
-                        register_notes: manualEntry.registerNotes, description: manualEntry.title
+                        register_notes: manualEntry.registerNotes, description: manualEntry.title,
+                        deadline: manualEntry.deadline || null,
+                        latest_activity_date: manualEntry.deadline || manualEntry.date || null
                     }).eq('id', editingManualEntry);
                     if (error) throw error;
                     setItems(items.map(item => item.id === editingManualEntry
@@ -768,7 +837,9 @@
                             date: manualEntry.date, link: manualEntry.link, assignedTo: manualEntry.assignedTo,
                             priority: manualEntry.priority, actionStatus: manualEntry.actionStatus,
                             noticeId: manualEntry.noticeId, registerIssue: manualEntry.registerIssue,
-                            registerNotes: manualEntry.registerNotes, description: manualEntry.title }
+                            registerNotes: manualEntry.registerNotes, description: manualEntry.title,
+                            deadline: manualEntry.deadline || null,
+                            latestActivityDate: manualEntry.deadline || manualEntry.date || null }
                         : item
                     ));
                     await logActivity('manual_entry_updated', editingManualEntry, manualEntry.title);
@@ -872,6 +943,7 @@
                         emailBody += `   Assigned To: ${item.assignedTo || 'Unassigned'}\n   Priority: ${item.priority || 'N/A'}\n`;
                         if (item.introducedBy) emailBody += `   Introduced By: ${item.introducedBy}\n`;
                         if (hearingData[item.id]?.date && !hearingData[item.id]?.isPast) emailBody += `   Hearing: ${hearingData[item.id].dateStr}\n`;
+                        if (item.additionalInformation) emailBody += `   Summary: ${item.additionalInformation.substring(0, 300)}${item.additionalInformation.length > 300 ? '...' : ''}\n`;
                         if (itemNotes[item.id]) emailBody += `   Notes: ${itemNotes[item.id]}\n`;
                         emailBody += `   Link: ${item.link}\n\n`;
                     });
@@ -885,6 +957,7 @@
                         emailBody += `   Assigned To: ${item.assignedTo || 'Unassigned'}\n   Priority: ${item.priority || 'N/A'}\n`;
                         if (item.introducedBy) emailBody += `   Introduced By: ${item.introducedBy}\n`;
                         if (hearingData[item.id]?.date && !hearingData[item.id]?.isPast) emailBody += `   Hearing: ${hearingData[item.id].dateStr}\n`;
+                        if (item.additionalInformation) emailBody += `   Summary: ${item.additionalInformation.substring(0, 300)}${item.additionalInformation.length > 300 ? '...' : ''}\n`;
                         if (itemNotes[item.id]) emailBody += `   Notes: ${itemNotes[item.id]}\n`;
                         emailBody += `   Link: ${item.link}\n\n`;
                     });
@@ -944,16 +1017,23 @@
                 const matchesUpcomingHearing = !filters.hasUpcomingHearing || (() => {
                     const h = hearingData[item.id];
                     if (h && h.date && !h.isPast) return true;
-                    return item.status && (
+                    // Only use keyword fallback for non-manual entries
+                    if (!item.isManualEntry && item.status && (
                         item.status.toLowerCase().includes('hearing') ||
                         item.status.toLowerCase().includes('scheduled') ||
                         item.status.toLowerCase().includes('notice') ||
                         item.status.toLowerCase().includes('markup')
-                    );
+                    )) return true;
+                    return false;
                 })();
                 return matchesKeyword && matchesCommittee && matchesCategory && matchesAssignedTo &&
                     matchesPriority && matchesActionStatus && matchesIntroducedBy &&
                     matchesHideTracked && matchesUpcomingHearing;
+            }).sort((a, b) => {
+                if (!sortByActivity) return 0; // preserve default order
+                const dateA = a.latestActivityDate ? new Date(a.latestActivityDate) : new Date(a.date || 0);
+                const dateB = b.latestActivityDate ? new Date(b.latestActivityDate) : new Date(b.date || 0);
+                return dateB - dateA;
             });
 
             const categories = ['all', ...new Set(items.map(i => i.category).filter(Boolean))];
@@ -1164,7 +1244,15 @@
 
                             <div className="lg:col-span-2">
                                 <div className="bg-white rounded-lg shadow-lg p-6">
-                                    <h2 className="text-xl font-semibold mb-4">Legislation ({filteredItems.length})</h2>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h2 className="text-xl font-semibold">Legislation ({filteredItems.length})</h2>
+                                        <button
+                                            onClick={() => setSortByActivity(s => !s)}
+                                            className={`px-3 py-1 text-xs rounded font-medium border ${sortByActivity ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                                        >
+                                            {sortByActivity ? '🕐 Sorted by Latest Activity' : 'Sort by Latest Activity'}
+                                        </button>
+                                    </div>
                                     {loading && <div className="text-center py-12 text-gray-500">Loading legislation...</div>}
                                     {!loading && filteredItems.length === 0 && (
                                         <div className="text-center py-12 text-gray-500">
@@ -1176,6 +1264,17 @@
                                             const hearing = hearingData[item.id];
                                             const hasUpcomingHearing = hearing && hearing.date && !hearing.isPast;
                                             const hasPastHearing = hearing && hearing.date && hearing.isPast;
+                                            // Keyword-based hearing badge only for non-manual entries
+                                            const hasKeywordHearing = !item.isManualEntry && !hasUpcomingHearing && !hasPastHearing && item.status && (
+                                                item.status.toLowerCase().includes('hearing') ||
+                                                item.status.toLowerCase().includes('scheduled') ||
+                                                item.status.toLowerCase().includes('notice') ||
+                                                item.status.toLowerCase().includes('markup')
+                                            );
+                                            const hasReReferral = item.committeeReReferral && item.committeeReReferral.length > 0;
+                                            const latestActivityStr = item.latestActivityDate
+                                                ? new Date(item.latestActivityDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                                : null;
                                             return (
                                                 <div key={item.id} className={`p-4 border-2 rounded-lg ${item.isNew ? 'border-red-200 bg-red-50' : 'border-gray-200'} ${selectedItems.has(item.id) ? 'ring-2 ring-indigo-400' : ''}`}>
                                                     <div className="flex items-start gap-3">
@@ -1186,11 +1285,17 @@
                                                                 {hasUpcomingHearing && (
                                                                     <span className="px-2 py-0.5 bg-amber-500 text-white text-xs font-bold rounded">📅 {hearing.dateStr}</span>
                                                                 )}
-                                                                {!hasUpcomingHearing && !hasPastHearing && item.status && (
-                                                                    item.status.toLowerCase().includes('hearing') || item.status.toLowerCase().includes('scheduled') ||
-                                                                    item.status.toLowerCase().includes('notice') || item.status.toLowerCase().includes('markup')
-                                                                ) && (
+                                                                {hasKeywordHearing && (
                                                                     <span className="px-2 py-0.5 bg-yellow-500 text-white text-xs font-bold rounded">📅 HEARING</span>
+                                                                )}
+                                                                {item.deadline && item.isManualEntry && (
+                                                                    <span className="px-2 py-0.5 bg-purple-500 text-white text-xs font-bold rounded">⏰ {new Date(item.deadline + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                                                                )}
+                                                                {hasReReferral && (
+                                                                    <span className="px-2 py-0.5 bg-orange-400 text-white text-xs font-bold rounded">🔁 Re-referred</span>
+                                                                )}
+                                                                {item.activityCount > 0 && (
+                                                                    <span className="px-2 py-0.5 bg-gray-500 text-white text-xs font-bold rounded" title="Status updates since introduction">{item.activityCount} update{item.activityCount !== 1 ? 's' : ''}</span>
                                                                 )}
                                                                 {item.hasNewActivity && selectedItems.has(item.id) && (
                                                                     <span className="px-2 py-0.5 bg-orange-500 text-white text-xs font-bold rounded animate-pulse">🔔 NEW ACTIVITY</span>
@@ -1215,6 +1320,18 @@
                                                                 </div>
                                                             )}
 
+                                                            {hasReReferral && (
+                                                                <div className="mb-2 p-2 bg-orange-50 border-l-4 border-orange-400 rounded">
+                                                                    <div className="text-xs font-semibold text-orange-800 mb-1">🔁 Committee Re-Referral</div>
+                                                                    {item.committeeReReferral.map((ref, idx) => (
+                                                                        <div key={idx} className="text-xs text-orange-700">
+                                                                            {ref.reReferralDate && <span className="font-medium">{new Date(ref.reReferralDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} — </span>}
+                                                                            {ref.fromCommittee && ref.toCommittee ? `${ref.fromCommittee} → ${ref.toCommittee}` : (ref.committee || ref.toCommittee || ref.fromCommittee || JSON.stringify(ref))}
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+
                                                             {item.hasNewActivity && item.activitySummary && selectedItems.has(item.id) && (
                                                                 <div className="mb-2 p-2 bg-orange-50 border-l-4 border-orange-500 rounded">
                                                                     <div className="flex justify-between items-start">
@@ -1230,9 +1347,30 @@
                                                             <div className="text-xs text-gray-500 mb-2">
                                                                 <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{item.billNumber || item.id}</a>
                                                                 {item.introducedBy && <span className="ml-2">• Introduced by: {item.introducedBy}</span>}
-                                                                {hearing?.checkedAt && <span className="ml-2 text-gray-400">• Hearing checked {new Date(hearing.checkedAt).toLocaleDateString()}</span>}
+                                                                {latestActivityStr && <span className="ml-2">• Latest activity: {latestActivityStr}</span>}
+                                                                {hearing?.checkedAt && <span className="ml-2 text-gray-400">• Checked {new Date(hearing.checkedAt).toLocaleDateString()}</span>}
                                                             </div>
                                                             <p className="text-sm text-gray-600 mb-2">{item.description}</p>
+
+                                                            {item.additionalInformation && (
+                                                                <div className="mb-2">
+                                                                    <button
+                                                                        onClick={() => setExpandedInfo(prev => {
+                                                                            const next = new Set(prev);
+                                                                            next.has(item.id) ? next.delete(item.id) : next.add(item.id);
+                                                                            return next;
+                                                                        })}
+                                                                        className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                                                                    >
+                                                                        {expandedInfo.has(item.id) ? '▲ Hide bill summary' : '▼ Show bill summary'}
+                                                                    </button>
+                                                                    {expandedInfo.has(item.id) && (
+                                                                        <div className="mt-1 p-2 bg-gray-50 border border-gray-200 rounded text-xs text-gray-700 leading-relaxed">
+                                                                            {item.additionalInformation}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
 
                                                             {item.committees && item.committees.length > 0 && (
                                                                 <div className="mb-2">
@@ -1245,8 +1383,9 @@
                                                                 </div>
                                                             )}
 
-                                                            {item.isManualEntry && (item.noticeId || item.registerIssue || item.registerNotes) && (
+                                                            {item.isManualEntry && (item.noticeId || item.registerIssue || item.registerNotes || item.deadline) && (
                                                                 <div className="mb-2 p-2 bg-purple-50 border border-purple-200 rounded">
+                                                                    {item.deadline && <div className="text-xs mb-1"><span className="font-semibold">⏰ Deadline/Hearing:</span> {new Date(item.deadline + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</div>}
                                                                     {item.noticeId && <div className="text-xs mb-1"><span className="font-semibold">Notice ID:</span> {item.noticeId}</div>}
                                                                     {item.registerIssue && <div className="text-xs mb-1"><span className="font-semibold">Register Issue:</span> {item.registerIssue}</div>}
                                                                     {item.registerNotes && <div className="text-xs"><span className="font-semibold">Register Notes:</span><p className="mt-1 whitespace-pre-wrap">{item.registerNotes}</p></div>}
@@ -1296,7 +1435,7 @@
                                                                 <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
                                                                     <span className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded">{item.category}</span>
                                                                     <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded">{item.status}</span>
-                                                                    <span>{item.date}</span>
+                                                                    <span>Introduced: {item.date}</span>
                                                                 </div>
                                                                 <div className="flex gap-2">
                                                                     {selectedItems.has(item.id) && !item.isManualEntry && (
@@ -1502,6 +1641,11 @@
                                             <label className="block text-sm font-medium mb-1">Date</label>
                                             <input type="date" value={manualEntry.date} onChange={e => setManualEntry({...manualEntry, date: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
                                         </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">⏰ Deadline / Hearing Date (optional)</label>
+                                        <input type="date" value={manualEntry.deadline} onChange={e => setManualEntry({...manualEntry, deadline: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                                        <p className="text-xs text-gray-500 mt-1">Shows as a purple deadline badge on the card</p>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-1">Register Notes</label>
