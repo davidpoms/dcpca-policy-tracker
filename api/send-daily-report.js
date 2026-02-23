@@ -1,20 +1,24 @@
 /**
  * /api/send-daily-report.js
  *
- * Sends a detailed daily status email to one recipient (yourself).
- * Runs Mon–Fri at 8:30am ET (after the hearing check cron at 8am).
+ * Sends a detailed daily status email via Gmail SMTP.
+ * Runs Mon–Fri at 8:30am ET (13:30 UTC).
  *
  * Env vars required:
- *   RESEND_API_KEY     — from resend.com
+ *   GMAIL_USER          — your Gmail address
+ *   GMAIL_APP_PASSWORD  — 16-char app password from myaccount.google.com/apppasswords
+ *   DAILY_REPORT_TO     — recipient email (can be same as GMAIL_USER)
  *   SUPABASE_URL
  *   SUPABASE_SERVICE_KEY
- *   DAILY_REPORT_TO    — your email address
- *   CRON_SECRET        — same one you set up for check-hearings
+ *   CRON_SECRET
  */
+
+import nodemailer from 'nodemailer';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const GMAIL_USER = process.env.GMAIL_USER;
+const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
 const DAILY_REPORT_TO = process.env.DAILY_REPORT_TO;
 const CRON_SECRET = process.env.CRON_SECRET;
 
@@ -43,9 +47,10 @@ export default async function handler(req, res) {
     const isVercelCron = req.headers['x-vercel-cron'] === '1';
     const isManual = CRON_SECRET && req.headers['authorization'] === `Bearer ${CRON_SECRET}`;
     if (!isVercelCron && !isManual) return res.status(401).json({ error: 'Unauthorized' });
-    if (!RESEND_API_KEY || !DAILY_REPORT_TO) return res.status(500).json({ error: 'Missing RESEND_API_KEY or DAILY_REPORT_TO' });
+    if (!GMAIL_USER || !GMAIL_APP_PASSWORD || !DAILY_REPORT_TO) {
+        return res.status(500).json({ error: 'Missing GMAIL_USER, GMAIL_APP_PASSWORD, or DAILY_REPORT_TO' });
+    }
 
-    // Load tracked items
     const items = await supabaseGet('/tracked_items?select=*&order=tracked_at.desc');
     const notes = await supabaseGet('/item_notes?select=*');
 
@@ -56,15 +61,12 @@ export default async function handler(req, res) {
     const actionNeeded = items.filter(i => i.action_status === 'action_needed');
     const monitorAndAssess = items.filter(i => i.action_status === 'monitor_and_assess');
     const completed = items.filter(i => i.action_status === 'action_completed');
-    const withHearings = items.filter(i => i.next_hearing_date && new Date(i.next_hearing_date) > now)
+    const withHearings = items
+        .filter(i => i.next_hearing_date && new Date(i.next_hearing_date) > now)
         .sort((a, b) => new Date(a.next_hearing_date) - new Date(b.next_hearing_date));
-
-    // ── Build HTML email ────────────────────────────────────────────────────────
 
     const sectionStyle = 'margin: 24px 0; padding: 16px; border-radius: 8px;';
     const itemStyle = 'margin: 12px 0; padding: 12px; border-radius: 6px; background: white; border: 1px solid #e5e7eb;';
-    const labelStyle = 'font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em;';
-    const valueStyle = 'font-size: 13px; color: #374151; margin-top: 2px;';
 
     const renderItem = (item, showHearing = true) => {
         const hearing = showHearing && item.next_hearing_date && new Date(item.next_hearing_date) > now;
@@ -72,7 +74,7 @@ export default async function handler(req, res) {
         return `
         <div style="${itemStyle}">
             <div style="font-size: 14px; font-weight: 600; color: #111827; margin-bottom: 8px;">
-                ${priorityEmoji(item.priority)} 
+                ${priorityEmoji(item.priority)}
                 ${item.link ? `<a href="${item.link}" style="color: #4f46e5; text-decoration: none;">${item.title}</a>` : item.title}
             </div>
             <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
@@ -100,30 +102,28 @@ export default async function handler(req, res) {
     <html>
     <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
     <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 700px; margin: 0 auto; padding: 24px; background: #f9fafb; color: #111827;">
-
-        <div style="background: #4f46e5; color: white; padding: 20px 24px; border-radius: 10px 10px 0 0; margin-bottom: 0;">
+        <div style="background: #4f46e5; color: white; padding: 20px 24px; border-radius: 10px 10px 0 0;">
             <h1 style="margin: 0; font-size: 20px; font-weight: 700;">DC Policy Tracker</h1>
             <p style="margin: 4px 0 0; font-size: 13px; opacity: 0.85;">Daily Status Report · ${now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
         </div>
-
         <div style="background: white; padding: 16px 24px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px; margin-bottom: 24px;">
             <table style="width: 100%; text-align: center; border-collapse: collapse;">
                 <tr>
                     <td style="padding: 8px; border-right: 1px solid #e5e7eb;">
                         <div style="font-size: 28px; font-weight: 700; color: #dc2626;">${actionNeeded.length}</div>
-                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em;">Action Needed</div>
+                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Action Needed</div>
                     </td>
                     <td style="padding: 8px; border-right: 1px solid #e5e7eb;">
                         <div style="font-size: 28px; font-weight: 700; color: #2563eb;">${monitorAndAssess.length}</div>
-                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em;">Monitor & Assess</div>
+                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Monitor & Assess</div>
                     </td>
                     <td style="padding: 8px; border-right: 1px solid #e5e7eb;">
                         <div style="font-size: 28px; font-weight: 700; color: #d97706;">${withHearings.length}</div>
-                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em;">Upcoming Hearings</div>
+                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Upcoming Hearings</div>
                     </td>
                     <td style="padding: 8px;">
                         <div style="font-size: 28px; font-weight: 700; color: #16a34a;">${completed.length}</div>
-                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em;">Completed</div>
+                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Completed</div>
                     </td>
                 </tr>
             </table>
@@ -159,28 +159,23 @@ export default async function handler(req, res) {
     </body>
     </html>`;
 
-    // ── Send via Resend ─────────────────────────────────────────────────────────
-    const emailRes = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${RESEND_API_KEY}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            from: 'DC Policy Tracker <onboarding@resend.dev>', 
-            to: [DAILY_REPORT_TO],
-            subject: `DC Policy Tracker · ${actionNeeded.length} action needed · ${withHearings.length} upcoming hearings · ${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
-            html
-        })
+    const transporter = nodemailer.createTransport({
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        auth: {
+            user: GMAIL_USER,
+            pass: GMAIL_APP_PASSWORD
+        }
     });
 
-    if (!emailRes.ok) {
-        const err = await emailRes.text();
-        console.error('Resend error:', err);
-        return res.status(500).json({ error: 'Email send failed', detail: err });
-    }
+    await transporter.sendMail({
+        from: `DC Policy Tracker <${GMAIL_USER}>`,
+        to: DAILY_REPORT_TO,
+        subject: `DC Policy Tracker · ${actionNeeded.length} action needed · ${withHearings.length} upcoming hearings · ${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+        html
+    });
 
-    const result = await emailRes.json();
-    console.log(`[daily-report] Sent to ${DAILY_REPORT_TO}, id: ${result.id}`);
-    return res.status(200).json({ sent: true, to: DAILY_REPORT_TO, id: result.id });
+    console.log(`[daily-report] Sent to ${DAILY_REPORT_TO}`);
+    return res.status(200).json({ sent: true, to: DAILY_REPORT_TO });
 }
