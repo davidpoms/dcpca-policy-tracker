@@ -137,7 +137,10 @@
             });
 
             // Re-referrals
-            (details.committeeReReferral || []).forEach(r => add(r.reReferralDate || r.date, 'Committee Re-Referral'));
+            (details.committeeReReferral || []).forEach(r => {
+                add(r.reReferralDate, 'Committee Re-Referral');
+                add(r.reReferralPublishedDate, 'Re-Referral Published');
+            });
 
             // Introduction dates as floor
             add(details.introductionPublicationDate, 'Introduction Published');
@@ -371,7 +374,7 @@
                 setHearingCheckProgress({ done: 0, total: trackedIds.length });
                 setError(null);
 
-                const BATCH_SIZE = 3;
+                const BATCH_SIZE = 1;
                 const newHearingData = { ...hearingData };
                 const now = new Date().toISOString();
 
@@ -420,7 +423,7 @@
                     }));
                     setHearingData({ ...newHearingData });
                     setHearingCheckProgress({ done: Math.min(i + BATCH_SIZE, trackedIds.length), total: trackedIds.length });
-                    if (i + BATCH_SIZE < trackedIds.length) await new Promise(r => setTimeout(r, 400));
+                    if (i + BATCH_SIZE < trackedIds.length) await new Promise(r => setTimeout(r, 1500));
                 }
 
                 setCheckingHearings(false);
@@ -1380,7 +1383,8 @@
                                                                     {item.committeeReReferral.map((ref, idx) => (
                                                                         <div key={idx} className="text-xs text-orange-700">
                                                                             {ref.reReferralDate && <span className="font-medium">{new Date(ref.reReferralDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} — </span>}
-                                                                            {ref.fromCommittee && ref.toCommittee ? `${ref.fromCommittee} → ${ref.toCommittee}` : (ref.committee || ref.toCommittee || ref.fromCommittee || JSON.stringify(ref))}
+                                                                            {Array.isArray(ref.committeeName) ? ref.committeeName.join(', ') : (ref.committeeName || ref.fromCommittee && ref.toCommittee ? `${ref.fromCommittee} → ${ref.toCommittee}` : '')}
+                                                                            {ref.reReferralPublishedDate && <span className="text-orange-500 ml-1">(published {new Date(ref.reReferralPublishedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})</span>}
                                                                         </div>
                                                                     ))}
                                                                 </div>
