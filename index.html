@@ -148,6 +148,8 @@
             const best = candidates[0];
             return { date: best.date, dateIso: best.date.toISOString(), label: best.label };
         }
+
+        function DCPolicyTracker() {
             const [items, setItems] = useState([]);
             const [filters, setFilters] = useState({
                 keywords: '',
