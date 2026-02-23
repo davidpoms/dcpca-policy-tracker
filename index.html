@@ -187,6 +187,8 @@
             const [newSponsor, setNewSponsor] = useState('');
             const [editingNote, setEditingNote] = useState(null);
             const [noteText, setNoteText] = useState('');
+            const [editingSummary, setEditingSummary] = useState(null);
+            const [summaryText, setSummaryText] = useState('');
             const [showManualEntry, setShowManualEntry] = useState(false);
             const [editingManualEntry, setEditingManualEntry] = useState(null);
             const [showActivityLog, setShowActivityLog] = useState(false);
@@ -247,6 +249,7 @@
                             registerNotes: item.register_notes || null,
                             isManualEntry: item.is_manual_entry || false,
                             additionalInformation: item.additional_information || null,
+                            manualSummary: item.manual_summary || null,
                             committeeReReferral: item.committee_re_referral || [],
                             latestActivityDate: item.latest_activity_date || item.date || null,
                             latestActivityLabel: item.latest_activity_label || null,
@@ -763,6 +766,26 @@
                 } catch (err) { setError('Failed to delete note: ' + err.message); }
             };
 
+            const saveSummary = async () => {
+                if (!editingSummary) return;
+                const item = items.find(i => i.id === editingSummary);
+                try {
+                    const { error } = await supabase.from('tracked_items').update({ manual_summary: summaryText || null }).eq('id', editingSummary);
+                    if (error) throw error;
+                    setItems(prev => prev.map(i => i.id === editingSummary ? { ...i, manualSummary: summaryText || null } : i));
+                    setEditingSummary(null);
+                    setSummaryText('');
+                } catch (err) { setError('Failed to save summary: ' + err.message); }
+            };
+
+            const deleteManualSummary = async (itemId) => {
+                try {
+                    const { error } = await supabase.from('tracked_items').update({ manual_summary: null }).eq('id', itemId);
+                    if (error) throw error;
+                    setItems(prev => prev.map(i => i.id === itemId ? { ...i, manualSummary: null } : i));
+                } catch (err) { setError('Failed to delete summary: ' + err.message); }
+            };
+
             const addKeyword = async () => {
                 if (!newKeyword.trim() || trackedKeywords.includes(newKeyword.toLowerCase())) return;
                 try {
@@ -999,7 +1022,8 @@
                         if (item.introducedBy) emailBody += `   Introduced By: ${item.introducedBy}\n`;
                         if (item.latestActivityDate && item.latestActivityLabel) emailBody += `   Latest Activity: ${item.latestActivityLabel} (${new Date(item.latestActivityDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })})\n`;
                         if (hearingData[item.id]?.date && !hearingData[item.id]?.isPast) emailBody += `   Hearing: ${hearingData[item.id].dateStr}\n`;
-                        if (item.additionalInformation) emailBody += `   Summary: ${item.additionalInformation.substring(0, 300)}${item.additionalInformation.length > 300 ? '...' : ''}\n`;
+                        const summary1 = item.manualSummary || item.additionalInformation;
+                        if (summary1) emailBody += `   Summary: ${summary1.substring(0, 300)}${summary1.length > 300 ? '...' : ''}\n`;
                         if (itemNotes[item.id]) emailBody += `   Notes: ${itemNotes[item.id]}\n`;
                         emailBody += `   Link: ${item.link}\n\n`;
                     });
@@ -1014,7 +1038,8 @@
                         if (item.introducedBy) emailBody += `   Introduced By: ${item.introducedBy}\n`;
                         if (item.latestActivityDate && item.latestActivityLabel) emailBody += `   Latest Activity: ${item.latestActivityLabel} (${new Date(item.latestActivityDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })})\n`;
                         if (hearingData[item.id]?.date && !hearingData[item.id]?.isPast) emailBody += `   Hearing: ${hearingData[item.id].dateStr}\n`;
-                        if (item.additionalInformation) emailBody += `   Summary: ${item.additionalInformation.substring(0, 300)}${item.additionalInformation.length > 300 ? '...' : ''}\n`;
+                        const summary2 = item.manualSummary || item.additionalInformation;
+                        if (summary2) emailBody += `   Summary: ${summary2.substring(0, 300)}${summary2.length > 300 ? '...' : ''}\n`;
                         if (itemNotes[item.id]) emailBody += `   Notes: ${itemNotes[item.id]}\n`;
                         emailBody += `   Link: ${item.link}\n\n`;
                     });
@@ -1412,23 +1437,34 @@
                                                             </div>
                                                             <p className="text-sm text-gray-600 mb-2">{item.description}</p>
 
-                                                            {item.additionalInformation && (
+                                                            {(item.additionalInformation || item.manualSummary) && (
                                                                 <div className="mb-2">
-                                                                    <button
-                                                                        onClick={() => setExpandedInfo(prev => {
-                                                                            const next = new Set(prev);
-                                                                            next.has(item.id) ? next.delete(item.id) : next.add(item.id);
-                                                                            return next;
-                                                                        })}
-                                                                        className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
-                                                                    >
-                                                                        {expandedInfo.has(item.id) ? '▲ Hide bill summary' : '▼ Show bill summary'}
-                                                                    </button>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <button
+                                                                            onClick={() => setExpandedInfo(prev => {
+                                                                                const next = new Set(prev);
+                                                                                next.has(item.id) ? next.delete(item.id) : next.add(item.id);
+                                                                                return next;
+                                                                            })}
+                                                                            className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                                                                        >
+                                                                            {expandedInfo.has(item.id) ? '▲ Hide bill summary' : '▼ Show bill summary'}
+                                                                        </button>
+                                                                        {item.manualSummary && <span className="text-xs text-purple-500">(manual)</span>}
+                                                                        {selectedItems.has(item.id) && (
+                                                                            <button onClick={() => { setEditingSummary(item.id); setSummaryText(item.manualSummary || ''); }} className="text-xs text-gray-400 hover:text-gray-600 underline">edit</button>
+                                                                        )}
+                                                                    </div>
                                                                     {expandedInfo.has(item.id) && (
                                                                         <div className="mt-1 p-2 bg-gray-50 border border-gray-200 rounded text-xs text-gray-700 leading-relaxed">
-                                                                            {item.additionalInformation}
+                                                                            {item.manualSummary || item.additionalInformation}
                                                                         </div>
                                                                     )}
+                                                                </div>
+                                                            )}
+                                                            {!item.additionalInformation && !item.manualSummary && selectedItems.has(item.id) && (
+                                                                <div className="mb-2">
+                                                                    <button onClick={() => { setEditingSummary(item.id); setSummaryText(''); }} className="text-xs text-gray-400 hover:text-gray-600 underline">+ Add bill summary</button>
                                                                 </div>
                                                             )}
 
@@ -1661,6 +1697,23 @@
                                 <div className="flex gap-2">
                                     <button onClick={saveNote} className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Save</button>
                                     <button onClick={() => { setEditingNote(null); setNoteText(''); }} className="flex-1 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {editingSummary && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                            <div className="bg-white rounded-lg p-6 max-w-2xl w-full">
+                                <h3 className="text-xl font-semibold mb-1">Bill Summary</h3>
+                                <p className="text-xs text-gray-500 mb-4">This overrides the LIMS summary for display and emails. Useful when LIMS hasn't populated the field yet.</p>
+                                <textarea value={summaryText} onChange={e => setSummaryText(e.target.value)} placeholder="Paste or type the bill summary..." className="w-full px-3 py-2 border rounded-lg mb-4 h-40" autoFocus />
+                                <div className="flex gap-2">
+                                    <button onClick={saveSummary} className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Save</button>
+                                    {items.find(i => i.id === editingSummary)?.manualSummary && (
+                                        <button onClick={() => { deleteManualSummary(editingSummary); setEditingSummary(null); setSummaryText(''); }} className="px-4 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200">Remove</button>
+                                    )}
+                                    <button onClick={() => { setEditingSummary(null); setSummaryText(''); }} className="flex-1 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300">Cancel</button>
                                 </div>
                             </div>
                         </div>
