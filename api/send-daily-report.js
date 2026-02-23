@@ -3,6 +3,11 @@
  *
  * Sends a detailed daily status email via Gmail SMTP.
  * Runs Mon–Fri at 8:30am ET (13:30 UTC).
+ */**
+ * /api/send-daily-report.js
+ *
+ * Sends a detailed daily status email via Gmail SMTP.
+ * Runs Mon–Fri at 8:30am ET (13:30 UTC).
  *
  * Env vars required:
  *   GMAIL_USER          — your Gmail address
@@ -93,7 +98,7 @@ export default async function handler(req, res) {
                 ${item.introduced_by ? `<tr><td style="padding: 2px 8px 2px 0; color: #6b7280;">Sponsor</td><td colspan="3" style="padding: 2px 0; color: #374151;">${item.introduced_by}</td></tr>` : ''}
                 ${item.latest_activity_date && item.latest_activity_label ? `<tr><td style="padding: 2px 8px 2px 0; color: #6b7280; white-space: nowrap;">Last Activity</td><td colspan="3" style="padding: 2px 0; color: #374151;">${item.latest_activity_label} &mdash; ${formatDate(item.latest_activity_date)}</td></tr>` : ''}
                 ${hearing ? `<tr><td style="padding: 4px 8px 2px 0; color: #d97706; font-weight: 600;">📅 Hearing</td><td colspan="3" style="padding: 4px 0; color: #d97706; font-weight: 600;">${formatDate(item.next_hearing_date)}${item.hearing_location ? ' — ' + item.hearing_location : ''}</td></tr>` : ''}
-                ${item.committee_re_referral && item.committee_re_referral.length > 0 ? `<tr><td style="padding: 4px 8px 2px 0; color: #c2410c; font-weight: 600;">🔁 Re-referred</td><td colspan="3" style="padding: 4px 0; color: #c2410c;">${item.committee_re_referral.map(r => r.fromCommittee && r.toCommittee ? `${r.fromCommittee} → ${r.toCommittee}` : (r.committee || r.toCommittee || '')).join('; ')}</td></tr>` : ''}
+                ${item.committee_re_referral && item.committee_re_referral.length > 0 ? `<tr><td style="padding: 4px 8px 2px 0; color: #c2410c; font-weight: 600;">🔁 Re-referred</td><td colspan="3" style="padding: 4px 0; color: #c2410c;">${item.committee_re_referral.map(r => `${Array.isArray(r.committeeName) ? r.committeeName.join(', ') : (r.committeeName || '')}${r.reReferralDate ? ' (' + new Date(r.reReferralDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ')' : ''}`).join('; ')}</td></tr>` : ''}
                 ${note ? `<tr><td style="padding: 4px 8px 2px 0; color: #6b7280; vertical-align: top;">Note</td><td colspan="3" style="padding: 4px 0; color: #374151; font-style: italic;">${note}</td></tr>` : ''}
                 ${item.additional_information ? `<tr><td style="padding: 4px 8px 2px 0; color: #6b7280; vertical-align: top;">Summary</td><td colspan="3" style="padding: 4px 0; color: #374151; font-size: 11px;">${item.additional_information.substring(0, 400)}${item.additional_information.length > 400 ? '…' : ''}</td></tr>` : ''}
             </table>
