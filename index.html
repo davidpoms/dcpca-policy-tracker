@@ -96,7 +96,57 @@
             };
         }
 
-        function DCPolicyTracker() {
+        // ─── Latest LIMS activity date ────────────────────────────────────────────────
+        function extractLatestActivityDate(details) {
+            const candidates = [];
+
+            const add = (val) => {
+                if (!val) return;
+                const d = new Date(val);
+                if (!isNaN(d) && d.getFullYear() > 2000) candidates.push(d);
+            };
+
+            // Congressional review (most recent for enacted bills)
+            if (details.congressionalReview) {
+                add(details.congressionalReview.effectiveDate);
+                add(details.congressionalReview.lawPublicationDate);
+                add(details.congressionalReview.transmittedDate);
+            }
+
+            // Mayoral review
+            if (details.mayoralReview) {
+                add(details.mayoralReview.enactedDate);
+                add(details.mayoralReview.signedDate);
+                add(details.mayoralReview.returnedDate);
+                add(details.mayoralReview.actPublicationDate);
+                add(details.mayoralReview.transmittedDate);
+            }
+
+            // Council actions (votes)
+            (details.actions || []).forEach(a => add(a.actionDate));
+
+            // Committee markups
+            (details.committeeMarkup || []).forEach(m => {
+                add(m.committeeActionDate);
+                add(m.reportFiledDate);
+            });
+
+            // Past hearings
+            (details.committeeHearing || []).forEach(h => add(h.hearingDate));
+
+            // Re-referrals
+            (details.committeeReReferral || []).forEach(r => {
+                add(r.reReferralDate || r.date);
+            });
+
+            // Introduction dates as floor
+            add(details.introductionPublicationDate);
+            add(details.introductionDate);
+
+            if (!candidates.length) return null;
+            candidates.sort((a, b) => b - a);
+            return candidates[0].toISOString();
+        }
             const [items, setItems] = useState([]);
             const [filters, setFilters] = useState({
                 keywords: '',
@@ -332,12 +382,8 @@
                             let activityCount = currentItem?.activityCount || 0;
                             if (details.status && currentItem?.lastStatus && details.status !== currentItem.lastStatus) activityCount++;
                             if (reReferrals.length > (currentItem?.committeeReReferral?.length || 0)) activityCount++;
-                            const latestReReferralDate = reReferrals.length > 0
-                                ? reReferrals.map(r => new Date(r.reReferralDate || r.date || 0)).sort((a,b) => b-a)[0]
-                                : null;
-                            const latestActivityDate = (latestReReferralDate?.toISOString())
-                                || (hearing.date && !hearing.isPast ? hearing.date.toISOString() : null)
-                                || currentItem?.latestActivityDate || now;
+                            const latestActivityDate = extractLatestActivityDate(details)
+                                || currentItem?.latestActivityDate || null;
 
                             newHearingData[id] = { ...hearing, checkedAt: now };
                             await supabase.from('tracked_items').update({
@@ -386,12 +432,8 @@
                     let activityCount = currentItem?.activityCount || 0;
                     if (details.status && currentItem?.lastStatus && details.status !== currentItem.lastStatus) activityCount++;
                     if (reReferrals.length > (currentItem?.committeeReReferral?.length || 0)) activityCount++;
-                    const latestReReferralDate = reReferrals.length > 0
-                        ? reReferrals.map(r => new Date(r.reReferralDate || r.date || 0)).sort((a,b) => b-a)[0]
-                        : null;
-                    const latestActivityDate = (latestReReferralDate?.toISOString())
-                        || (hearing.date && !hearing.isPast ? hearing.date.toISOString() : null)
-                        || currentItem?.latestActivityDate || now;
+                    const latestActivityDate = extractLatestActivityDate(details)
+                        || currentItem?.latestActivityDate || null;
 
                     setHearingData(prev => ({ ...prev, [itemId]: { ...hearing, checkedAt: now } }));
                     setItems(prev => prev.map(i => i.id === itemId ? {
