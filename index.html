@@ -787,14 +787,16 @@
             };
 
             const addKeyword = async () => {
-                if (!newKeyword.trim() || trackedKeywords.includes(newKeyword.toLowerCase())) return;
+                if (!newKeyword.trim()) return;
+                const incoming = newKeyword.split(',').map(k => k.trim().toLowerCase()).filter(k => k && !trackedKeywords.includes(k));
+                if (!incoming.length) { setNewKeyword(''); setShowAddKeyword(false); return; }
                 try {
-                    const { error } = await supabase.from('tracked_keywords').insert({ keyword: newKeyword.toLowerCase() });
+                    const { error } = await supabase.from('tracked_keywords').insert(incoming.map(k => ({ keyword: k })));
                     if (error) throw error;
-                    setTrackedKeywords([...trackedKeywords, newKeyword.toLowerCase()]);
+                    setTrackedKeywords([...trackedKeywords, ...incoming]);
                     setNewKeyword(''); setShowAddKeyword(false);
-                    await logActivity('keyword_added', null, null, { keyword: newKeyword.toLowerCase() });
-                } catch (err) { setError('Failed to add keyword: ' + err.message); }
+                    await logActivity('keyword_added', null, null, { keywords: incoming.join(', ') });
+                } catch (err) { setError('Failed to add keywords: ' + err.message); }
             };
 
             const removeKeyword = async (keyword) => {
@@ -1652,7 +1654,7 @@
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
                             <div className="bg-white rounded-lg p-6 max-w-md w-full">
                                 <h3 className="text-xl font-semibold mb-4">Add Keyword</h3>
-                                <input type="text" value={newKeyword} onChange={e => setNewKeyword(e.target.value)} onKeyPress={e => e.key === 'Enter' && addKeyword()} placeholder="e.g., education, healthcare" className="w-full px-3 py-2 border rounded-lg mb-4" autoFocus />
+                                <input type="text" value={newKeyword} onChange={e => setNewKeyword(e.target.value)} onKeyPress={e => e.key === 'Enter' && addKeyword()} placeholder="e.g., housing, eviction, affordable (comma-separate to add multiple)" className="w-full px-3 py-2 border rounded-lg mb-4" autoFocus />
                                 <div className="flex gap-2">
                                     <button onClick={addKeyword} className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Add</button>
                                     <button onClick={() => { setShowAddKeyword(false); setNewKeyword(''); }} className="flex-1 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300">Cancel</button>
