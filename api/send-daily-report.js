@@ -58,18 +58,20 @@ export default async function handler(req, res) {
     notes.forEach(n => { notesMap[n.item_id] = n.note_text; });
 
     const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // midnight local time
+
     const actionNeeded = items.filter(i => i.action_status === 'action_needed');
     const monitorAndAssess = items.filter(i => i.action_status === 'monitor_and_assess');
     const completed = items.filter(i => i.action_status === 'action_completed');
     const withHearings = items
-        .filter(i => i.next_hearing_date && new Date(i.next_hearing_date) > now)
+        .filter(i => i.next_hearing_date && new Date(i.next_hearing_date) >= todayStart)
         .sort((a, b) => new Date(a.next_hearing_date) - new Date(b.next_hearing_date));
 
     const sectionStyle = 'margin: 24px 0; padding: 16px; border-radius: 8px;';
     const itemStyle = 'margin: 12px 0; padding: 12px; border-radius: 6px; background: white; border: 1px solid #e5e7eb;';
 
     const renderItem = (item, showHearing = true) => {
-        const hearing = showHearing && item.next_hearing_date && new Date(item.next_hearing_date) > now;
+        const hearing = showHearing && item.next_hearing_date && new Date(item.next_hearing_date) >= todayStart;
         const note = notesMap[item.id];
         return `
         <div style="${itemStyle}">
