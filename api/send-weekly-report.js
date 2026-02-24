@@ -1,6 +1,9 @@
 /**
  * /api/send-weekly-report.js
  *
+ * Sends a clean weekly summary to a broader group./**
+ * /api/send-weekly-report.js
+ *
  * Sends a clean weekly summary to a broader group.
  * Runs every Monday at 9am ET.
  * Less internal detail than the daily — no notes, no per-item priority.
@@ -44,11 +47,12 @@ export default async function handler(req, res) {
 
     const items = await supabaseGet('/tracked_items?select=*&order=tracked_at.desc');
     const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const actionNeeded = items.filter(i => i.action_status === 'action_needed');
     const monitorAndAssess = items.filter(i => i.action_status === 'monitor_and_assess');
     const withHearings = items
-        .filter(i => i.next_hearing_date && new Date(i.next_hearing_date) > now)
+        .filter(i => i.next_hearing_date && new Date(i.next_hearing_date) >= todayStart)
         .sort((a, b) => new Date(a.next_hearing_date) - new Date(b.next_hearing_date));
 
     // Week range label
@@ -76,7 +80,7 @@ export default async function handler(req, res) {
             </thead>
             <tbody>
                 ${sectionItems.map((item, idx) => {
-                    const hearing = item.next_hearing_date && new Date(item.next_hearing_date) > now;
+                    const hearing = item.next_hearing_date && new Date(item.next_hearing_date) >= todayStart;
                     const activityStr = item.latest_activity_date && item.latest_activity_label
                         ? `${item.latest_activity_label}<br><span style="color:#9ca3af">${formatDate(item.latest_activity_date)}</span>`
                         : item.latest_activity_date ? formatDate(item.latest_activity_date) : '—';
