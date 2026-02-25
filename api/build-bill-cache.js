@@ -1,26 +1,35 @@
 /**
  * /api/build-bill-cache.js
  *
- * Builds and maintains a full cache of all LIMS legislation details
- * in the lims_bill_cache Supabase table.
+ * Incrementally builds the lims_bill_cache table — processes 20 bills per
+ * invocation to stay within Vercel's function timeout.
  *
- * Strategy:
- *   - Runs nightly at midnight ET (05:00 UTC)
- *   - Paginates through ALL bills for the current council period via SearchLegislation
- *   - For each bill, fetches full LegislationDetails and upserts into cache
- *   - Skips bills already cached in the last 7 days unless their status changed
- *   - Can be triggered manually via CRON_SECRET for initial population
+ * First call: paginates SearchLegislation to collect all bill numbers,
+ *             saves them + cursor position to lims_cache_cursor, then
+ *             processes the first batch.
+ * Subsequent calls: picks up where it left off.
+ * When complete: returns { status: "complete" }
  *
- * Env vars required:
- *   SUPABASE_URL, SUPABASE_SERVICE_KEY, CRON_SECRET
+ * PowerShell loop to run until done:
+ *   $headers = @{ "Authorization" = "Bearer YOUR_SECRET" }
+ *   do {
+ *     $r = Invoke-WebRequest -Uri "https://dcpca-policy-tracker.vercel.app/api/build-bill-cache" -Method POST -Headers $headers
+ *     $body = $r.Content | ConvertFrom-Json
+ *     Write-Host "$($body.position)/$($body.total) — $($body.status)"
+ *     Start-Sleep 5
+ *   } while ($body.status -eq "in_progress")
+ *
+ * Env vars required: SUPABASE_URL, SUPABASE_SERVICE_KEY, CRON_SECRET
  */
 
-const SUPABASE_URL  = process.env.SUPABASE_URL;
-const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_KEY;
-const CRON_SECRET   = process.env.CRON_SECRET;
+const SUPABASE_URL   = process.env.SUPABASE_URL;
+const SUPABASE_KEY   = process.env.SUPABASE_SERVICE_KEY;
+const CRON_SECRET    = process.env.CRON_SECRET;
+const PROXY_URL      = 'https://dcpca-policy-tracker.vercel.app/api/hello';
 const COUNCIL_PERIOD = 26;
-const DETAIL_DELAY_MS = 1200;  // between detail fetches
-const PAGE_DELAY_MS   = 800;   // between pagination requests
+const PAGE_SIZE      = 100;  // bills per SearchLegislation page
+const BATCH_SIZE     = 20;   // detail fetches per invocation
+const DETAIL_DELAY   = 1200; // ms between detail fetches
 
 // ─── Supabase helpers ─────────────────────────────────────────────────────────
 
@@ -41,19 +50,20 @@ async function sbGet(path) {
 
 async function sbUpsert(table, body) {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-        method: 'POST',
-        headers: sbHeaders,
-        body: JSON.stringify(body)
+        method: 'POST', headers: sbHeaders, body: JSON.stringify(body)
     });
-    if (!r.ok) {
-        const text = await r.text();
-        throw new Error(`Supabase UPSERT ${table}: ${r.status} ${text}`);
-    }
+    if (!r.ok) throw new Error(`Supabase UPSERT ${table}: ${r.status} ${await r.text()}`);
 }
 
-// ─── LIMS helpers ─────────────────────────────────────────────────────────────
+async function sbPatch(table, filter, body) {
+    const qs = Object.entries(filter).map(([k,v]) => `${k}=eq.${encodeURIComponent(v)}`).join('&');
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${qs}`, {
+        method: 'PATCH', headers: sbHeaders, body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error(`Supabase PATCH ${table}: ${r.status}`);
+}
 
-const PROXY_URL = 'https://dcpca-policy-tracker.vercel.app/api/hello';
+// ─── LIMS via proxy ───────────────────────────────────────────────────────────
 
 async function limsPost(endpoint, body) {
     const r = await fetch(PROXY_URL, {
@@ -80,7 +90,6 @@ async function limsGet(endpoint) {
 }
 
 const delay = ms => new Promise(r => setTimeout(r, ms));
-
 const parseMembers = (val) =>
     Array.isArray(val) ? val.map(m => m.memberName || String(m)).join('; ') : (val || null);
 
@@ -91,92 +100,103 @@ export default async function handler(req, res) {
     const isManual = CRON_SECRET && req.headers['authorization'] === `Bearer ${CRON_SECRET}`;
     if (!isVercelCron && !isManual) return res.status(401).json({ error: 'Unauthorized' });
 
-    const now = new Date();
-    const stats = { fetched: 0, upserted: 0, skipped: 0, errors: 0 };
+    // ── Load or initialize cursor ─────────────────────────────────────────────
+    let cursorRows = await sbGet(`/lims_cache_cursor?council_period_id=eq.${COUNCIL_PERIOD}`);
+    let cursor = cursorRows[0];
 
-    // Load existing cache to know what's fresh (cached within last 7 days)
-    const sevenDaysAgo = new Date(now); sevenDaysAgo.setDate(now.getDate() - 7);
-    const existingCache = await sbGet(
-        `/lims_bill_cache?select=bill_number,status,cached_at&council_period_id=eq.${COUNCIL_PERIOD}`
-    );
-    const cacheMap = {}; // bill_number -> { status, cached_at }
-    existingCache.forEach(r => { cacheMap[r.bill_number] = r; });
-    console.log(`[build-bill-cache] ${existingCache.length} bills already in cache`);
+    if (!cursor) {
+        console.log('[build-bill-cache] No cursor found — collecting all bill numbers...');
 
-    // ── 1. Paginate through all legislation ───────────────────────────────────
-    const allBills = [];
-    let offset = 0;
-    while (true) {
-        try {
+        const allBillNumbers = [];
+        let offset = 0;
+        while (true) {
             const page = await limsPost('/SearchLegislation', {
                 Keyword: '', CategoryId: 0,
-                CouncilPeriodId: COUNCIL_PERIOD, RowLimit: 100, OffSet: offset
+                CouncilPeriodId: COUNCIL_PERIOD, RowLimit: PAGE_SIZE, OffSet: offset
             });
             if (!Array.isArray(page) || page.length === 0) break;
-            allBills.push(...page);
-            console.log(`[build-bill-cache] Fetched page at offset ${offset}: ${page.length} bills (total: ${allBills.length})`);
-            if (page.length < 100) break;
-            offset += 100;
-            await delay(PAGE_DELAY_MS);
-        } catch (err) {
-            console.error(`[build-bill-cache] Pagination error at offset ${offset}:`, err.message);
-            break;
+            allBillNumbers.push(...page.map(b => b.legislationNumber).filter(Boolean));
+            console.log(`[build-bill-cache] Collected ${allBillNumbers.length} bills so far...`);
+            if (page.length < PAGE_SIZE) break;
+            offset += PAGE_SIZE;
+            await delay(800);
         }
+
+        cursor = {
+            council_period_id: COUNCIL_PERIOD,
+            bill_numbers: allBillNumbers,
+            position: 0,
+            total: allBillNumbers.length,
+            completed: false,
+            started_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        };
+        await sbUpsert('lims_cache_cursor', cursor);
+        console.log(`[build-bill-cache] Cursor initialized with ${allBillNumbers.length} bills`);
     }
 
-    stats.fetched = allBills.length;
-    console.log(`[build-bill-cache] Total bills found: ${allBills.length}`);
+    if (cursor.completed) {
+        return res.status(200).json({
+            status: 'complete',
+            total: cursor.total,
+            message: 'Cache is fully built. Delete the lims_cache_cursor row to rebuild from scratch.'
+        });
+    }
 
-    // ── 2. Fetch details for each bill and upsert ─────────────────────────────
-    for (const bill of allBills) {
-        const billNum = bill.legislationNumber;
-        if (!billNum) continue;
+    // ── Process next batch ────────────────────────────────────────────────────
+    const billNumbers = cursor.bill_numbers;
+    const start = cursor.position;
+    const end = Math.min(start + BATCH_SIZE, billNumbers.length);
+    const batch = billNumbers.slice(start, end);
 
-        const cached = cacheMap[billNum];
-        const cachedAt = cached ? new Date(cached.cached_at) : null;
-        const isFresh = cachedAt && cachedAt >= sevenDaysAgo;
-        const statusUnchanged = cached && cached.status === bill.status;
+    const stats = { upserted: 0, errors: 0 };
 
-        // Skip if fresh and status hasn't changed
-        if (isFresh && statusUnchanged) {
-            stats.skipped++;
-            continue;
-        }
-
+    for (const billNum of batch) {
         try {
             const details = await limsGet(`/LegislationDetails/${billNum}`);
-
-            const introducedBy = parseMembers(details.introducers);
-            const coIntroducers = parseMembers(details.coIntroducers);
-            const committees = Array.isArray(details.committeesReferredTo)
-                ? details.committeesReferredTo.join('; ')
-                : (details.referredToCommittees || null);
 
             await sbUpsert('lims_bill_cache', {
                 bill_number: billNum,
                 council_period_id: COUNCIL_PERIOD,
-                title: details.title || bill.title,
-                category: details.category || bill.category,
-                status: details.status || bill.status,
-                introduced_by: introducedBy,
-                co_introducers: coIntroducers,
-                committees: committees,
+                title: details.title,
+                category: details.category,
+                status: details.status,
+                introduced_by: parseMembers(details.introducers),
+                co_introducers: parseMembers(details.coIntroducers),
+                committees: Array.isArray(details.committeesReferredTo)
+                    ? details.committeesReferredTo.join('; ')
+                    : (details.referredToCommittees || null),
                 introduction_date: details.introductionDate || null,
                 additional_information: details.additionalInformation || null,
                 link: `https://lims.dccouncil.gov/Legislation/${billNum}`,
                 raw_details: details,
-                cached_at: now.toISOString()
+                cached_at: new Date().toISOString()
             });
-
             stats.upserted++;
         } catch (err) {
             console.error(`[build-bill-cache] Error on ${billNum}:`, err.message);
             stats.errors++;
         }
-
-        await delay(DETAIL_DELAY_MS);
+        await delay(DETAIL_DELAY);
     }
 
-    console.log(`[build-bill-cache] Done:`, stats);
-    return res.status(200).json({ ...stats, total: allBills.length });
+    // ── Save cursor progress ──────────────────────────────────────────────────
+    const newPosition = end;
+    const completed = newPosition >= billNumbers.length;
+    await sbPatch('lims_cache_cursor', { council_period_id: COUNCIL_PERIOD }, {
+        position: newPosition,
+        completed,
+        updated_at: new Date().toISOString()
+    });
+
+    const remaining = billNumbers.length - newPosition;
+    console.log(`[build-bill-cache] ${newPosition}/${billNumbers.length} — ${remaining} remaining`);
+
+    return res.status(200).json({
+        ...stats,
+        position: newPosition,
+        total: billNumbers.length,
+        remaining,
+        status: completed ? 'complete' : 'in_progress'
+    });
 }
