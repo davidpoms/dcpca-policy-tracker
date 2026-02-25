@@ -89,7 +89,7 @@ export default async function handler(req, res) {
                     <th style="${thStyle}">Bill / Title</th>
                     <th style="${thStyle}">Status</th>
                     <th style="${thStyle}">Last Activity</th>
-                    <th style="${thStyle}">Assigned To</th>
+                    <th style="${thStyle}">Committee</th>
                     ${showHearing ? `<th style="${thStyle}">Hearing</th>` : ''}
                 </tr>
             </thead>
@@ -107,7 +107,7 @@ export default async function handler(req, res) {
                         </td>
                         <td style="${rowStyle} color: #374151;">${item.status || '—'}</td>
                         <td style="${rowStyle} color: #374151; font-size: 12px;">${activityStr}</td>
-                        <td style="${rowStyle} color: #374151;">${item.assigned_to || 'Unassigned'}</td>
+                        <td style="${rowStyle} color: #374151;">${item.referred_to_committees && item.referred_to_committees !== 'null' ? item.referred_to_committees : '—'}</td>
                         ${showHearing ? `<td style="${rowStyle} ${hearing ? 'color: #d97706; font-weight: 600;' : 'color: #9ca3af;'}">${hearing ? `📅 ${formatDate(item.next_hearing_date)}` : '—'}</td>` : ''}
                     </tr>`;
                 }).join('')}
@@ -145,18 +145,6 @@ export default async function handler(req, res) {
             ${renderTable(withHearings, false)}
         </div>` : ''}
 
-        ${actionNeeded.length > 0 ? `
-        <div style="margin-bottom: 24px;">
-            <h2 style="font-size: 15px; font-weight: 700; color: #991b1b; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 2px solid #fca5a5;">Action Needed</h2>
-            ${renderTable(actionNeeded)}
-        </div>` : ''}
-
-        ${monitorAndAssess.length > 0 ? `
-        <div style="margin-bottom: 24px;">
-            <h2 style="font-size: 15px; font-weight: 700; color: #1e40af; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 2px solid #93c5fd;">Monitor & Assess</h2>
-            ${renderTable(monitorAndAssess)}
-        </div>` : ''}
-
         ${recentlyUpdated.length > 0 ? `
         <div style="margin-bottom: 24px;">
             <h2 style="font-size: 15px; font-weight: 700; color: #166534; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 2px solid #86efac;">🆕 Recent Updates — Last 30 Days (${recentlyUpdated.length})</h2>
@@ -189,6 +177,18 @@ export default async function handler(req, res) {
                     }).join('')}
                 </tbody>
             </table>
+        </div>` : ''}
+
+        ${actionNeeded.length > 0 ? `
+        <div style="margin-bottom: 24px;">
+            <h2 style="font-size: 15px; font-weight: 700; color: #991b1b; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 2px solid #fca5a5;">Action Needed</h2>
+            ${renderTable(actionNeeded)}
+        </div>` : ''}
+
+        ${monitorAndAssess.length > 0 ? `
+        <div style="margin-bottom: 24px;">
+            <h2 style="font-size: 15px; font-weight: 700; color: #1e40af; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 2px solid #93c5fd;">Monitor & Assess</h2>
+            ${renderTable(monitorAndAssess)}
         </div>` : ''}
 
         <div style="margin-top: 32px; padding: 16px; background: #f3f4f6; border-radius: 8px; font-size: 12px; color: #6b7280; text-align: center;">
