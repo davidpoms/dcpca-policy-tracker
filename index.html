@@ -626,13 +626,21 @@
                                     Keyword: sponsor, CategoryId: 0,
                                     CouncilPeriodId: selectedPeriod.councilPeriodId, RowLimit: 50, OffSet: 0
                                 });
-                                allResults.push(Array.isArray(results) ? results.filter(leg => {
-                                    const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || '');
-                                    const by = parseMembers(leg.introducers) || leg.introducedBy || leg.primarySponsor || leg.sponsor || '';
-                                    const coBy = parseMembers(leg.coIntroducers) || '';
-                                    return (by && by.toLowerCase().includes(sponsor.toLowerCase())) ||
-                                           (coBy && coBy.toLowerCase().includes(sponsor.toLowerCase()));
-                                }) : []);
+                                const candidates = Array.isArray(results) ? results : [];
+                                const verified = [];
+                                for (const leg of candidates) {
+                                    try {
+                                        const details = await proxyFetch(`/LegislationDetails/${leg.legislationNumber}`, 'GET', null);
+                                        const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || '');
+                                        const by = parseMembers(details.introducers);
+                                        const coBy = parseMembers(details.coIntroducers);
+                                        if (by.toLowerCase().includes(sponsor.toLowerCase()) || coBy.toLowerCase().includes(sponsor.toLowerCase())) {
+                                            verified.push(leg);
+                                        }
+                                    } catch (e) { /* skip on error */ }
+                                    await delay(800);
+                                }
+                                allResults.push(verified);
                             } catch (err) { console.error(`Error searching sponsor "${sponsor}":`, err); allResults.push([]); }
                             await delay(1000);
                         }
