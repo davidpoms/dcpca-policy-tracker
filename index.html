@@ -627,6 +627,7 @@
                                     CouncilPeriodId: selectedPeriod.councilPeriodId, RowLimit: 50, OffSet: 0
                                 });
                                 const candidates = Array.isArray(results) ? results : [];
+                                console.log(`[sponsor search] "${sponsor}" → ${candidates.length} candidates from keyword search`);
                                 const verified = [];
                                 for (const leg of candidates) {
                                     try {
@@ -634,12 +635,14 @@
                                         const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || '');
                                         const by = parseMembers(details.introducers);
                                         const coBy = parseMembers(details.coIntroducers);
+                                        console.log(`  ${leg.legislationNumber}: introducers="${by}" coIntroducers="${coBy}"`);
                                         if (by.toLowerCase().includes(sponsor.toLowerCase()) || coBy.toLowerCase().includes(sponsor.toLowerCase())) {
                                             verified.push(leg);
                                         }
-                                    } catch (e) { /* skip on error */ }
+                                    } catch (e) { console.warn(`  Error fetching details for ${leg.legislationNumber}:`, e.message); }
                                     await delay(800);
                                 }
+                                console.log(`[sponsor search] "${sponsor}" → ${verified.length} verified matches`);
                                 allResults.push(verified);
                             } catch (err) { console.error(`Error searching sponsor "${sponsor}":`, err); allResults.push([]); }
                             await delay(1000);
