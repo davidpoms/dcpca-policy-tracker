@@ -620,32 +620,44 @@
                         }
                     }
                     if ((searchMode === 'all' || searchMode === 'sponsors') && trackedSponsors.length > 0) {
+                        // Query the lims_bill_cache table in Supabase — populated nightly by build-bill-cache cron
                         for (const sponsor of trackedSponsors) {
                             try {
-                                const results = await proxyFetch('/SearchLegislation', 'POST', {
-                                    Keyword: sponsor, CategoryId: 0,
-                                    CouncilPeriodId: selectedPeriod.councilPeriodId, RowLimit: 50, OffSet: 0
+                                // Search introduced_by and co_introducers columns
+                                const [byIntroducer, byCo] = await Promise.all([
+                                    supabase.from('lims_bill_cache')
+                                        .select('*')
+                                        .eq('council_period_id', selectedPeriod.councilPeriodId)
+                                        .ilike('introduced_by', `%${sponsor}%`),
+                                    supabase.from('lims_bill_cache')
+                                        .select('*')
+                                        .eq('council_period_id', selectedPeriod.councilPeriodId)
+                                        .ilike('co_introducers', `%${sponsor}%`)
+                                ]);
+                                const seen = new Set();
+                                const matches = [];
+                                [...(byIntroducer.data || []), ...(byCo.data || [])].forEach(row => {
+                                    if (!seen.has(row.bill_number)) {
+                                        seen.add(row.bill_number);
+                                        // Shape to match LIMS search result format
+                                        matches.push({
+                                            legislationNumber: row.bill_number,
+                                            title: row.title,
+                                            category: row.category,
+                                            status: row.status,
+                                            introducers: row.introduced_by,
+                                            referredToCommittees: row.committees,
+                                            introductionDate: row.introduction_date,
+                                            shortDescription: row.title
+                                        });
+                                    }
                                 });
-                                const candidates = Array.isArray(results) ? results : [];
-                                console.log(`[sponsor search] "${sponsor}" → ${candidates.length} candidates from keyword search`);
-                                const verified = [];
-                                for (const leg of candidates) {
-                                    try {
-                                        const details = await proxyFetch(`/LegislationDetails/${leg.legislationNumber}`, 'GET', null);
-                                        const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || '');
-                                        const by = parseMembers(details.introducers);
-                                        const coBy = parseMembers(details.coIntroducers);
-                                        console.log(`  ${leg.legislationNumber}: introducers="${by}" coIntroducers="${coBy}"`);
-                                        if (by.toLowerCase().includes(sponsor.toLowerCase()) || coBy.toLowerCase().includes(sponsor.toLowerCase())) {
-                                            verified.push(leg);
-                                        }
-                                    } catch (e) { console.warn(`  Error fetching details for ${leg.legislationNumber}:`, e.message); }
-                                    await delay(800);
-                                }
-                                console.log(`[sponsor search] "${sponsor}" → ${verified.length} verified matches`);
-                                allResults.push(verified);
-                            } catch (err) { console.error(`Error searching sponsor "${sponsor}":`, err); allResults.push([]); }
-                            await delay(1000);
+                                console.log(`[sponsor search] "${sponsor}" → ${matches.length} matches from cache`);
+                                allResults.push(matches);
+                            } catch (err) {
+                                console.error(`Error searching sponsor "${sponsor}" in cache:`, err);
+                                allResults.push([]);
+                            }
                         }
                     }
 
@@ -1895,7 +1907,8 @@
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
                             <div className="bg-white rounded-lg p-6 max-w-md w-full">
                                 <h3 className="text-xl font-semibold mb-4">Add Sponsor</h3>
-                                <p className="text-sm text-gray-600 mb-3">Enter the councilmember's last name or full name</p>
+                                <p className="text-sm text-gray-600 mb-1">Enter the councilmember's last name or full name</p>
+                                <p className="text-xs text-amber-600 mb-3">⚠️ Sponsor search requires the bill cache to be built. If this is your first time using sponsor search, manually trigger <code className="bg-gray-100 px-1 rounded">/api/build-bill-cache</code> via your Vercel dashboard, or wait for the nightly cron (midnight ET).</p>
                                 <input type="text" value={newSponsor} onChange={e => setNewSponsor(e.target.value)} onKeyPress={e => e.key === 'Enter' && addSponsor()} placeholder="e.g., Allen, Nadeau, McDuffie" className="w-full px-3 py-2 border rounded-lg mb-4" autoFocus />
                                 <div className="flex gap-2">
                                     <button onClick={addSponsor} className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Add</button>
