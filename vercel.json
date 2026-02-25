@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/build-bill-cache",
+      "schedule": "0 5 * * *"
+    },
+    {
       "path": "/api/check-hearings",
       "schedule": "0 13 * * 1-5"
     },
