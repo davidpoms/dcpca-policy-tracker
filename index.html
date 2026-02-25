@@ -213,6 +213,9 @@
             // ── UI state ──────────────────────────────────────────────────────────────
             const [expandedInfo, setExpandedInfo] = useState(new Set());
             const [sortByActivity, setSortByActivity] = useState(false);
+            const [activityFilter, setActivityFilter] = useState('all'); // 'all' | '7' | '30' | '90'
+            const [statusHistory, setStatusHistory] = useState({}); // item_id -> [{old_status, new_status, changed_at, change_label}]
+            const [expandedHistory, setExpandedHistory] = useState(new Set());
 
             const PROXY_URL = 'https://dcpca-policy-tracker.vercel.app/api/hello';
 
@@ -305,6 +308,18 @@
                         .from('team_members').select('*').eq('active', true).order('name', { ascending: true });
                     if (membersError) throw membersError;
                     if (membersData) setTeamMembers(membersData);
+
+                    // Load status history
+                    const { data: historyData } = await supabase
+                        .from('bill_status_history').select('*').order('changed_at', { ascending: false });
+                    if (historyData) {
+                        const histMap = {};
+                        historyData.forEach(h => {
+                            if (!histMap[h.item_id]) histMap[h.item_id] = [];
+                            histMap[h.item_id].push(h);
+                        });
+                        setStatusHistory(histMap);
+                    }
 
                 } catch (err) {
                     console.error('Error loading from Supabase:', err);
@@ -1106,7 +1121,6 @@
                 const matchesUpcomingHearing = !filters.hasUpcomingHearing || (() => {
                     const h = hearingData[item.id];
                     if (h && h.date && !h.isPast) return true;
-                    // Only use keyword fallback for non-manual entries
                     if (!item.isManualEntry && item.status && (
                         item.status.toLowerCase().includes('hearing') ||
                         item.status.toLowerCase().includes('scheduled') ||
@@ -1115,9 +1129,17 @@
                     )) return true;
                     return false;
                 })();
+                const matchesActivityFilter = (() => {
+                    if (activityFilter === 'all') return true;
+                    const days = parseInt(activityFilter);
+                    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
+                    const actDate = item.latestActivityDate ? new Date(item.latestActivityDate) : null;
+                    const addedDate = item.isManualEntry && item.trackedAt ? new Date(item.trackedAt) : null;
+                    return (actDate && actDate >= cutoff) || (addedDate && addedDate >= cutoff);
+                })();
                 return matchesKeyword && matchesCommittee && matchesCategory && matchesAssignedTo &&
                     matchesPriority && matchesActionStatus && matchesIntroducedBy &&
-                    matchesHideTracked && matchesUpcomingHearing;
+                    matchesHideTracked && matchesUpcomingHearing && matchesActivityFilter;
             }).sort((a, b) => {
                 if (!sortByActivity) return 0; // preserve default order
                 const dateA = a.latestActivityDate ? new Date(a.latestActivityDate) : new Date(a.date || 0);
@@ -1335,12 +1357,24 @@
                                 <div className="bg-white rounded-lg shadow-lg p-6">
                                     <div className="flex items-center justify-between mb-4">
                                         <h2 className="text-xl font-semibold">Legislation ({filteredItems.length})</h2>
-                                        <button
-                                            onClick={() => setSortByActivity(s => !s)}
-                                            className={`px-3 py-1 text-xs rounded font-medium border ${sortByActivity ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
-                                        >
-                                            {sortByActivity ? '🕐 Sorted by Latest Activity' : 'Sort by Latest Activity'}
-                                        </button>
+                                        <div className="flex items-center gap-2">
+                                            <select
+                                                value={activityFilter}
+                                                onChange={e => setActivityFilter(e.target.value)}
+                                                className={`px-3 py-1 text-xs rounded font-medium border ${activityFilter !== 'all' ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-300'}`}
+                                            >
+                                                <option value="all">All Activity</option>
+                                                <option value="7">Active last 7 days</option>
+                                                <option value="30">Active last 30 days</option>
+                                                <option value="90">Active last 90 days</option>
+                                            </select>
+                                            <button
+                                                onClick={() => setSortByActivity(s => !s)}
+                                                className={`px-3 py-1 text-xs rounded font-medium border ${sortByActivity ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                                            >
+                                                {sortByActivity ? '🕐 Sorted by Latest Activity' : 'Sort by Latest Activity'}
+                                            </button>
+                                        </div>
                                     </div>
                                     {loading && <div className="text-center py-12 text-gray-500">Loading legislation...</div>}
                                     {!loading && filteredItems.length === 0 && (
@@ -1443,6 +1477,34 @@
                                                                 {hearing?.checkedAt && <span className="ml-2 text-gray-400">• Checked {new Date(hearing.checkedAt).toLocaleDateString()}</span>}
                                                             </div>
                                                             <p className="text-sm text-gray-600 mb-2">{item.description}</p>
+
+                                                            {(statusHistory[item.id] || []).length > 0 && (
+                                                                <div className="mb-2">
+                                                                    <button
+                                                                        onClick={() => setExpandedHistory(prev => {
+                                                                            const next = new Set(prev);
+                                                                            next.has(item.id) ? next.delete(item.id) : next.add(item.id);
+                                                                            return next;
+                                                                        })}
+                                                                        className="text-xs text-gray-400 hover:text-gray-600 font-medium"
+                                                                    >
+                                                                        {expandedHistory.has(item.id) ? '▲ Hide status history' : `▼ Status history (${(statusHistory[item.id] || []).length})`}
+                                                                    </button>
+                                                                    {expandedHistory.has(item.id) && (
+                                                                        <div className="mt-1 p-2 bg-gray-50 border border-gray-200 rounded">
+                                                                            {(statusHistory[item.id] || []).map((h, idx) => (
+                                                                                <div key={idx} className="flex items-start gap-1 text-xs py-1 border-b border-gray-100 last:border-0 flex-wrap">
+                                                                                    <span className="text-gray-400 whitespace-nowrap">{new Date(h.changed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                                                                    <span className="text-gray-400 line-through">{h.old_status}</span>
+                                                                                    <span className="text-gray-400">→</span>
+                                                                                    <span className="text-gray-700 font-medium">{h.new_status}</span>
+                                                                                    {h.change_label && <span className="text-gray-400 italic">· {h.change_label}</span>}
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
 
                                                             {(item.additionalInformation || item.manualSummary) && (
                                                                 <div className="mb-2">
