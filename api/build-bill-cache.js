@@ -18,7 +18,6 @@
 const SUPABASE_URL  = process.env.SUPABASE_URL;
 const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_KEY;
 const CRON_SECRET   = process.env.CRON_SECRET;
-const LIMS_BASE     = 'https://lims.dccouncil.gov/api/v2';
 const COUNCIL_PERIOD = 26;
 const DETAIL_DELAY_MS = 1200;  // between detail fetches
 const PAGE_DELAY_MS   = 800;   // between pagination requests
@@ -54,22 +53,30 @@ async function sbUpsert(table, body) {
 
 // ─── LIMS helpers ─────────────────────────────────────────────────────────────
 
+const PROXY_URL = 'https://dcpca-policy-tracker.vercel.app/api/hello';
+
 async function limsPost(endpoint, body) {
-    const r = await fetch(`${LIMS_BASE}${endpoint}`, {
+    const r = await fetch(PROXY_URL, {
         method: 'POST',
-        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint, method: 'POST', body })
     });
-    if (!r.ok) throw new Error(`LIMS POST ${endpoint}: ${r.status}`);
-    return r.json();
+    if (!r.ok) throw new Error(`Proxy POST ${endpoint}: ${r.status}`);
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    return data;
 }
 
 async function limsGet(endpoint) {
-    const r = await fetch(`${LIMS_BASE}${endpoint}`, {
-        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
+    const r = await fetch(PROXY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint, method: 'GET', body: null })
     });
-    if (!r.ok) throw new Error(`LIMS GET ${endpoint}: ${r.status}`);
-    return r.json();
+    if (!r.ok) throw new Error(`Proxy GET ${endpoint}: ${r.status}`);
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    return data;
 }
 
 const delay = ms => new Promise(r => setTimeout(r, ms));
