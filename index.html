@@ -304,6 +304,7 @@
                             assignedTo: item.assigned_to, priority: item.priority,
                             actionStatus: item.action_status || 'action_needed',
                             introducedBy: item.introduced_by,
+                            coIntroducers: item.co_introducers || null,
                             hasNewActivity: item.has_new_activity || false,
                             activitySummary: item.activity_summary || null,
                             lastStatus: item.last_status || null,
@@ -473,6 +474,9 @@
                             const latestActivityDate = latestActivity?.dateIso || currentItem?.latestActivityDate || null;
                             const latestActivityLabel = latestActivity?.label || currentItem?.latestActivityLabel || null;
                             const activityTimeline = extractActivityTimeline(details);
+                            const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || null);
+                            const introducedBy = parseMembers(details.introducers) || currentItem?.introducedBy || null;
+                            const coIntroducers = parseMembers(details.coIntroducers) || null;
 
                             newHearingData[id] = { ...hearing, checkedAt: now };
                             await supabase.from('tracked_items').update({
@@ -486,6 +490,8 @@
                                 latest_activity_label: latestActivityLabel,
                                 activity_count: activityCount,
                                 activity_timeline: activityTimeline.length > 0 ? activityTimeline : null,
+                                ...(introducedBy ? { introduced_by: introducedBy } : {}),
+                                co_introducers: coIntroducers,
                                 ...(details.status ? { status: details.status } : {})
                             }).eq('id', id);
 
@@ -497,6 +503,8 @@
                                 latestActivityLabel: latestActivityLabel,
                                 activityCount: activityCount,
                                 activityTimeline: activityTimeline.length > 0 ? activityTimeline : i.activityTimeline,
+                                introducedBy: introducedBy || i.introducedBy,
+                                coIntroducers: coIntroducers,
                                 status: details.status || i.status
                             } : i));
                         } catch (err) {
@@ -530,6 +538,10 @@
                     const latestActivityLabel = latestActivity?.label || currentItem?.latestActivityLabel || null;
 
                     const activityTimeline = extractActivityTimeline(details);
+                    const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || null);
+                    const introducedBy = parseMembers(details.introducers) || currentItem?.introducedBy || null;
+                    const coIntroducers = parseMembers(details.coIntroducers) || null;
+
                     setHearingData(prev => ({ ...prev, [itemId]: { ...hearing, checkedAt: now } }));
                     setItems(prev => prev.map(i => i.id === itemId ? {
                         ...i,
@@ -539,6 +551,8 @@
                         latestActivityLabel: latestActivityLabel,
                         activityCount: activityCount,
                         activityTimeline: activityTimeline.length > 0 ? activityTimeline : i.activityTimeline,
+                        introducedBy: introducedBy || i.introducedBy,
+                        coIntroducers: coIntroducers,
                         status: details.status || i.status
                     } : i));
                     await supabase.from('tracked_items').update({
@@ -552,6 +566,8 @@
                         latest_activity_label: latestActivityLabel,
                         activity_count: activityCount,
                         activity_timeline: activityTimeline.length > 0 ? activityTimeline : null,
+                        ...(introducedBy ? { introduced_by: introducedBy } : {}),
+                        co_introducers: coIntroducers,
                         ...(details.status ? { status: details.status } : {})
                     }).eq('id', itemId);
                 } catch (err) { console.error(`Error checking hearing for ${itemId}:`, err); }
@@ -604,7 +620,22 @@
                         }
                     }
                     if ((searchMode === 'all' || searchMode === 'sponsors') && trackedSponsors.length > 0) {
-                        trackedSponsors.forEach(() => allResults.push([]));
+                        for (const sponsor of trackedSponsors) {
+                            try {
+                                const results = await proxyFetch('/SearchLegislation', 'POST', {
+                                    Keyword: sponsor, CategoryId: 0,
+                                    CouncilPeriodId: selectedPeriod.councilPeriodId, RowLimit: 50, OffSet: 0
+                                });
+                                allResults.push(Array.isArray(results) ? results.filter(leg => {
+                                    const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || '');
+                                    const by = parseMembers(leg.introducers) || leg.introducedBy || leg.primarySponsor || leg.sponsor || '';
+                                    const coBy = parseMembers(leg.coIntroducers) || '';
+                                    return (by && by.toLowerCase().includes(sponsor.toLowerCase())) ||
+                                           (coBy && coBy.toLowerCase().includes(sponsor.toLowerCase()));
+                                }) : []);
+                            } catch (err) { console.error(`Error searching sponsor "${sponsor}":`, err); allResults.push([]); }
+                            await delay(1000);
+                        }
                     }
 
                     const results = allResults;
@@ -622,7 +653,9 @@
                     const transformedItems = allLegislation.map(leg => {
                         const cs = leg.referredToCommittees;
                         const committees = (cs && cs !== 'null' && typeof cs === 'string' && cs.trim()) ? [cs] : [];
-                        const introducedBy = leg.introducedBy || leg.primarySponsor || leg.introducers || leg.sponsor || null;
+                        const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || null);
+                        const introducedBy = parseMembers(leg.introducers) || leg.introducedBy || leg.primarySponsor || leg.sponsor || null;
+                        const coIntroducers = parseMembers(leg.coIntroducers) || null;
                         return {
                             id: leg.legislationNumber, title: leg.title, billNumber: leg.legislationNumber,
                             category: leg.category || leg.subCategory || 'Uncategorized',
@@ -631,7 +664,7 @@
                             description: leg.shortDescription || leg.title,
                             link: `https://lims.dccouncil.gov/Legislation/${leg.legislationNumber}`,
                             source: 'DC Council', isNew: isNewItem(leg.introductionDate),
-                            assignedTo: null, priority: null, actionStatus: 'action_needed', introducedBy
+                            assignedTo: null, priority: null, actionStatus: 'action_needed', introducedBy, coIntroducers
                         };
                     });
 
@@ -696,7 +729,9 @@
                     const transformedItems = allLegislation.map(leg => {
                         const cs = leg.referredToCommittees;
                         const committees = (cs && cs !== 'null' && typeof cs === 'string' && cs.trim()) ? [cs] : [];
-                        const introducedBy = leg.introducedBy || leg.primarySponsor || leg.introducers || leg.sponsor || null;
+                        const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || null);
+                        const introducedBy = parseMembers(leg.introducers) || leg.introducedBy || leg.primarySponsor || leg.sponsor || null;
+                        const coIntroducers = parseMembers(leg.coIntroducers) || null;
                         return {
                             id: leg.legislationNumber, title: leg.title, billNumber: leg.legislationNumber,
                             category: leg.category || leg.subCategory || 'Uncategorized',
@@ -705,7 +740,7 @@
                             description: leg.shortDescription || leg.title,
                             link: `https://lims.dccouncil.gov/Legislation/${leg.legislationNumber}`,
                             source: 'DC Council', isNew: isNewItem(leg.introductionDate),
-                            assignedTo: null, priority: null, actionStatus: 'action_needed', introducedBy
+                            assignedTo: null, priority: null, actionStatus: 'action_needed', introducedBy, coIntroducers
                         };
                     });
                     const filteredByCategory = categoryName !== 'all'
@@ -1150,7 +1185,7 @@
             const exportToCSV = () => {
                 const headers = [
                     'Title', 'Bill Number', 'Category', 'Status', 'Committees',
-                    'Introduced By', 'Date Introduced', 'Latest Activity', 'Latest Activity Date',
+                    'Introduced By', 'Co-Introduced By', 'Date Introduced', 'Latest Activity', 'Latest Activity Date',
                     'Next Hearing', 'Hearing Type', 'Hearing Location',
                     'Action Status', 'Priority', 'Assigned To',
                     'Re-Referrals', 'Activity Count',
@@ -1174,6 +1209,7 @@
                         item.status,
                         item.committees ? item.committees.join('; ') : '',
                         item.introducedBy || '',
+                        item.coIntroducers || '',
                         item.date || '',
                         item.latestActivityLabel || '',
                         item.latestActivityDate ? new Date(item.latestActivityDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '',
@@ -1570,6 +1606,7 @@
                                                             <div className="text-xs text-gray-500 mb-2">
                                                                 <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{item.billNumber || item.id}</a>
                                                                 {item.introducedBy && <span className="ml-2">• Introduced by: {item.introducedBy}</span>}
+                                                                {item.coIntroducers && <span className="ml-2 text-gray-400">• Co-introduced by: {item.coIntroducers}</span>}
                                                                 {latestActivityStr && (
                                                                     <span className="ml-2">• {item.latestActivityLabel ? `${item.latestActivityLabel}: ${latestActivityStr}` : `Latest activity: ${latestActivityStr}`}</span>
                                                                 )}
