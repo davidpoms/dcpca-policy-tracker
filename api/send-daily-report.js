@@ -53,12 +53,32 @@ export default async function handler(req, res) {
 
     const items = await supabaseGet('/tracked_items?select=*&order=tracked_at.desc');
     const notes = await supabaseGet('/item_notes?select=*');
+    const statusHistory = await supabaseGet('/bill_status_history?select=*&order=changed_at.desc');
 
     const notesMap = {};
     notes.forEach(n => { notesMap[n.item_id] = n.note_text; });
 
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // midnight local time
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const sevenDaysAgo = new Date(now); sevenDaysAgo.setDate(now.getDate() - 7);
+
+    // Recent updates: LIMS activity in last 7 days OR manually added in last 7 days
+    const recentlyUpdated = items.filter(i => {
+        const actDate = i.latest_activity_date ? new Date(i.latest_activity_date) : null;
+        const addedDate = i.tracked_at ? new Date(i.tracked_at) : null;
+        return (actDate && actDate >= sevenDaysAgo) || (i.is_manual_entry && addedDate && addedDate >= sevenDaysAgo);
+    }).sort((a, b) => {
+        const da = new Date(a.latest_activity_date || a.tracked_at || 0);
+        const db = new Date(b.latest_activity_date || b.tracked_at || 0);
+        return db - da;
+    });
+
+    // Build status history map per item
+    const historyMap = {};
+    statusHistory.forEach(h => {
+        if (!historyMap[h.item_id]) historyMap[h.item_id] = [];
+        historyMap[h.item_id].push(h);
+    });
 
     const actionNeeded = items.filter(i => i.action_status === 'action_needed');
     const monitorAndAssess = items.filter(i => i.action_status === 'monitor_and_assess');
@@ -134,6 +154,37 @@ export default async function handler(req, res) {
             </table>
         </div>
 
+        ${recentlyUpdated.length > 0 ? `
+        <div style="${sectionStyle} background: #f0fdf4; border: 1px solid #86efac;">
+            <h2 style="margin: 0 0 12px; font-size: 15px; color: #166534;">🆕 Recent Updates — Last 7 Days (${recentlyUpdated.length})</h2>
+            ${recentlyUpdated.map(item => {
+                const recentHistory = (historyMap[item.id] || []).filter(h => new Date(h.changed_at) >= sevenDaysAgo);
+                const note = notesMap[item.id];
+                return `
+                <div style="${itemStyle}">
+                    <div style="font-size: 14px; font-weight: 600; color: #111827; margin-bottom: 8px;">
+                        ${item.link ? `<a href="${item.link}" style="color: #4f46e5; text-decoration: none;">${item.title}</a>` : item.title}
+                    </div>
+                    <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 2px 8px 2px 0; color: #6b7280;">Bill</td>
+                            <td style="padding: 2px 0; color: #374151;">${item.bill_number || item.id}</td>
+                            <td style="padding: 2px 8px 2px 16px; color: #6b7280;">Assigned</td>
+                            <td style="padding: 2px 0; color: #374151;">${item.assigned_to || 'Unassigned'}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 2px 8px 2px 0; color: #6b7280;">Status</td>
+                            <td colspan="3" style="padding: 2px 0; color: #374151;">${item.status || '—'}</td>
+                        </tr>
+                        ${item.latest_activity_label && item.latest_activity_date ? `<tr><td style="padding: 2px 8px 2px 0; color: #16a34a; font-weight: 600;">Latest</td><td colspan="3" style="padding: 2px 0; color: #16a34a; font-weight: 600;">${item.latest_activity_label} — ${formatDate(item.latest_activity_date)}</td></tr>` : ''}
+                        ${item.is_manual_entry ? `<tr><td style="padding: 2px 8px 2px 0; color: #7c3aed; font-weight: 600;">Source</td><td colspan="3" style="padding: 2px 0; color: #7c3aed;">DC Register / Manual Entry</td></tr>` : ''}
+                        ${recentHistory.length > 0 ? `<tr><td style="padding: 4px 8px 2px 0; color: #6b7280; vertical-align: top;">Changes</td><td colspan="3" style="padding: 4px 0; color: #374151; font-size: 11px;">${recentHistory.map(h => `${h.old_status} → ${h.new_status}`).join('<br>')}</td></tr>` : ''}
+                        ${note ? `<tr><td style="padding: 4px 8px 2px 0; color: #6b7280; vertical-align: top;">Note</td><td colspan="3" style="padding: 4px 0; color: #374151; font-style: italic;">${note}</td></tr>` : ''}
+                    </table>
+                </div>`;
+            }).join('')}
+        </div>` : ''}
+
         ${withHearings.length > 0 ? `
         <div style="${sectionStyle} background: #fffbeb; border: 1px solid #fcd34d;">
             <h2 style="margin: 0 0 12px; font-size: 15px; color: #92400e;">📅 Upcoming Hearings</h2>
@@ -177,7 +228,7 @@ export default async function handler(req, res) {
     await transporter.sendMail({
         from: `DC Policy Tracker <${GMAIL_USER}>`,
         to: DAILY_REPORT_TO,
-        subject: `DC Policy Tracker · ${actionNeeded.length} action needed · ${withHearings.length} upcoming hearings · ${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+        subject: `DC Policy Tracker · ${actionNeeded.length} action needed · ${withHearings.length} upcoming hearings · ${recentlyUpdated.length} recent updates · ${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
         html
     });
 
