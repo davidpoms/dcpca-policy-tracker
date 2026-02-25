@@ -1,9 +1,6 @@
 /**
  * /api/send-weekly-report.js
  *
- * Sends a clean weekly summary to a broader group./**
- * /api/send-weekly-report.js
- *
  * Sends a clean weekly summary to a broader group.
  * Runs every Monday at 9am ET.
  * Less internal detail than the daily — no notes, no per-item priority.
@@ -46,14 +43,32 @@ export default async function handler(req, res) {
     if (!RESEND_API_KEY || !WEEKLY_REPORT_TO) return res.status(500).json({ error: 'Missing RESEND_API_KEY or WEEKLY_REPORT_TO' });
 
     const items = await supabaseGet('/tracked_items?select=*&order=tracked_at.desc');
+    const statusHistory = await supabaseGet('/bill_status_history?select=*&order=changed_at.desc');
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const thirtyDaysAgo = new Date(now); thirtyDaysAgo.setDate(now.getDate() - 30);
 
     const actionNeeded = items.filter(i => i.action_status === 'action_needed');
     const monitorAndAssess = items.filter(i => i.action_status === 'monitor_and_assess');
     const withHearings = items
         .filter(i => i.next_hearing_date && new Date(i.next_hearing_date) >= todayStart)
         .sort((a, b) => new Date(a.next_hearing_date) - new Date(b.next_hearing_date));
+
+    const recentlyUpdated = items.filter(i => {
+        const actDate = i.latest_activity_date ? new Date(i.latest_activity_date) : null;
+        const addedDate = i.tracked_at ? new Date(i.tracked_at) : null;
+        return (actDate && actDate >= thirtyDaysAgo) || (i.is_manual_entry && addedDate && addedDate >= thirtyDaysAgo);
+    }).sort((a, b) => {
+        const da = new Date(a.latest_activity_date || a.tracked_at || 0);
+        const db = new Date(b.latest_activity_date || b.tracked_at || 0);
+        return db - da;
+    });
+
+    const historyMap = {};
+    statusHistory.forEach(h => {
+        if (!historyMap[h.item_id]) historyMap[h.item_id] = [];
+        historyMap[h.item_id].push(h);
+    });
 
     // Week range label
     const weekStart = new Date(now);
@@ -140,6 +155,40 @@ export default async function handler(req, res) {
         <div style="margin-bottom: 24px;">
             <h2 style="font-size: 15px; font-weight: 700; color: #1e40af; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 2px solid #93c5fd;">Monitor & Assess</h2>
             ${renderTable(monitorAndAssess)}
+        </div>` : ''}
+
+        ${recentlyUpdated.length > 0 ? `
+        <div style="margin-bottom: 24px;">
+            <h2 style="font-size: 15px; font-weight: 700; color: #166534; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 2px solid #86efac;">🆕 Recent Updates — Last 30 Days (${recentlyUpdated.length})</h2>
+            <table style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+                <thead>
+                    <tr>
+                        <th style="${thStyle}">Bill / Title</th>
+                        <th style="${thStyle}">Status</th>
+                        <th style="${thStyle}">Latest Activity</th>
+                        <th style="${thStyle}">Source</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${recentlyUpdated.map((item, idx) => {
+                        const recentChanges = (historyMap[item.id] || []).filter(h => new Date(h.changed_at) >= thirtyDaysAgo);
+                        return `
+                        <tr style="background: ${idx % 2 === 0 ? 'white' : '#f0fdf4'}">
+                            <td style="${rowStyle}">
+                                ${item.link ? `<a href="${item.link}" style="color: #4f46e5; font-weight: 500; text-decoration: none;">${item.bill_number || item.id}</a>` : (item.bill_number || item.id)}
+                                <div style="font-size: 12px; color: #374151; margin-top: 2px;">${item.title}</div>
+                            </td>
+                            <td style="${rowStyle} color: #374151;">${item.status || '—'}</td>
+                            <td style="${rowStyle} color: #374151; font-size: 12px;">
+                                ${item.latest_activity_label ? `<span style="color:#166534;font-weight:600;">${item.latest_activity_label}</span><br>` : ''}
+                                ${item.latest_activity_date ? `<span style="color:#9ca3af">${formatDate(item.latest_activity_date)}</span>` : '—'}
+                                ${recentChanges.length > 0 ? `<br><span style="color:#6b7280;font-size:11px;">${recentChanges.map(h => `${h.old_status} → ${h.new_status}`).join('; ')}</span>` : ''}
+                            </td>
+                            <td style="${rowStyle} color: #374151;">${item.is_manual_entry ? '<span style="color:#7c3aed;">DC Register</span>' : 'LIMS'}</td>
+                        </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>
         </div>` : ''}
 
         <div style="margin-top: 32px; padding: 16px; background: #f3f4f6; border-radius: 8px; font-size: 12px; color: #6b7280; text-align: center;">
