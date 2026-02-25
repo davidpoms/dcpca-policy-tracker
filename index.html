@@ -1148,16 +1148,47 @@
             };
 
             const exportToCSV = () => {
-                const headers = ['Title', 'Bill Number', 'Category', 'Status', 'Next Hearing', 'Hearing Location', 'Committees', 'Date', 'Assigned To', 'Priority', 'Action Status', 'Introduced By', 'Link', 'Notes', 'Tracked'];
+                const headers = [
+                    'Title', 'Bill Number', 'Category', 'Status', 'Committees',
+                    'Introduced By', 'Date Introduced', 'Latest Activity', 'Latest Activity Date',
+                    'Next Hearing', 'Hearing Type', 'Hearing Location',
+                    'Action Status', 'Priority', 'Assigned To',
+                    'Re-Referrals', 'Activity Count',
+                    'Bill Summary', 'Notes',
+                    'Activity Timeline',
+                    'Link', 'Tracked'
+                ];
                 const rows = filteredItems.map(item => {
                     const h = hearingData[item.id];
+                    const reReferrals = (item.committeeReReferral || [])
+                        .map(r => `${Array.isArray(r.committeeName) ? r.committeeName.join(', ') : (r.committeeName || '')}${r.reReferralDate ? ' (' + new Date(r.reReferralDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ')' : ''}`)
+                        .join('; ');
+                    const timeline = (item.activityTimeline || [])
+                        .map(e => `${e.dateStr}: ${e.label}${e.extra ? ' (' + e.extra + ')' : ''}`)
+                        .join(' | ');
+                    const summary = item.manualSummary || item.additionalInformation || '';
                     return [
-                        item.title, item.billNumber || '', item.category, item.status,
-                        h?.dateStr || '', h?.location || '',
+                        item.title,
+                        item.billNumber || '',
+                        item.category,
+                        item.status,
                         item.committees ? item.committees.join('; ') : '',
-                        item.date, item.assignedTo || '', item.priority || '',
-                        item.actionStatus || '', item.introducedBy || '',
-                        item.link || '', itemNotes[item.id] || '',
+                        item.introducedBy || '',
+                        item.date || '',
+                        item.latestActivityLabel || '',
+                        item.latestActivityDate ? new Date(item.latestActivityDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '',
+                        h?.dateStr || '',
+                        h?.type || '',
+                        h?.location || '',
+                        item.actionStatus || '',
+                        item.priority || '',
+                        item.assignedTo || '',
+                        reReferrals,
+                        item.activityCount || 0,
+                        summary,
+                        itemNotes[item.id] || '',
+                        timeline,
+                        item.link || '',
                         selectedItems.has(item.id) ? 'Yes' : 'No'
                     ];
                 });
