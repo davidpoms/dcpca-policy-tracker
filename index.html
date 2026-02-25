@@ -152,7 +152,66 @@
             return { date: best.date, dateIso: best.date.toISOString(), label: best.label };
         }
 
-        function DCPolicyTracker() {
+        // ─── Full LIMS activity timeline ──────────────────────────────────────────────
+        function extractActivityTimeline(details) {
+            const events = [];
+            const add = (val, label, extra) => {
+                if (!val) return;
+                const d = new Date(val);
+                if (!isNaN(d) && d.getFullYear() > 2000) events.push({ date: d, label, extra: extra || null });
+            };
+
+            add(details.introductionDate, 'Introduced');
+            add(details.committeeReferralDate, 'Referred to Committee');
+            add(details.introductionPublicationDate, 'Introduction Published');
+
+            (details.committeeReReferral || []).forEach(r => {
+                const committee = Array.isArray(r.committeeName) ? r.committeeName.join(', ') : (r.committeeName || '');
+                add(r.reReferralDate, 'Committee Re-Referral', committee);
+                add(r.reReferralPublishedDate, 'Re-Referral Published', committee);
+            });
+
+            (details.committeeHearing || []).forEach(h => {
+                add(h.noticeFiledDate, `${h.hearingType || 'Hearing'} Notice Filed`);
+                add(h.hearingDate, h.hearingType || 'Committee Hearing');
+            });
+
+            (details.committeeMarkup || []).forEach(m => {
+                add(m.committeeActionDate, 'Committee Markup');
+                add(m.reportFiledDate, 'Committee Report Filed');
+            });
+
+            (details.actions || []).forEach(a => {
+                const voteResult = a.voteDetails?.voteResult;
+                add(a.actionDate, a.action?.trim() || 'Council Action', voteResult || null);
+            });
+
+            if (details.mayoralReview) {
+                add(details.mayoralReview.transmittedDate, 'Transmitted to Mayor');
+                add(details.mayoralReview.signedDate, 'Signed by Mayor');
+                add(details.mayoralReview.returnedDate, 'Returned by Mayor');
+                add(details.mayoralReview.enactedDate, 'Enacted');
+                add(details.mayoralReview.actPublicationDate, 'Act Published');
+            }
+
+            if (details.congressionalReview) {
+                add(details.congressionalReview.transmittedDate, 'Transmitted to Congress');
+                add(details.congressionalReview.effectiveDate, 'Effective Date (Law)');
+                add(details.congressionalReview.lawPublicationDate, 'Law Published');
+            }
+
+            // Deduplicate by date+label, sort chronologically
+            const seen = new Set();
+            return events
+                .filter(e => { const k = `${e.date.getTime()}::${e.label}`; if (seen.has(k)) return false; seen.add(k); return true; })
+                .sort((a, b) => a.date - b.date)
+                .map(e => ({
+                    dateStr: e.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+                    label: e.label,
+                    extra: e.extra,
+                    isFuture: e.date > new Date()
+                }));
+        }
             const [items, setItems] = useState([]);
             const [filters, setFilters] = useState({
                 keywords: '',
@@ -253,6 +312,7 @@
                             isManualEntry: item.is_manual_entry || false,
                             additionalInformation: item.additional_information || null,
                             manualSummary: item.manual_summary || null,
+                            activityTimeline: item.activity_timeline || null,
                             committeeReReferral: item.committee_re_referral || [],
                             latestActivityDate: item.latest_activity_date || item.date || null,
                             latestActivityLabel: item.latest_activity_label || null,
@@ -410,6 +470,7 @@
                             const latestActivity = extractLatestActivityDate(details);
                             const latestActivityDate = latestActivity?.dateIso || currentItem?.latestActivityDate || null;
                             const latestActivityLabel = latestActivity?.label || currentItem?.latestActivityLabel || null;
+                            const activityTimeline = extractActivityTimeline(details);
 
                             newHearingData[id] = { ...hearing, checkedAt: now };
                             await supabase.from('tracked_items').update({
@@ -422,6 +483,7 @@
                                 latest_activity_date: latestActivityDate,
                                 latest_activity_label: latestActivityLabel,
                                 activity_count: activityCount,
+                                activity_timeline: activityTimeline.length > 0 ? activityTimeline : null,
                                 ...(details.status ? { status: details.status } : {})
                             }).eq('id', id);
 
@@ -432,6 +494,7 @@
                                 latestActivityDate: latestActivityDate,
                                 latestActivityLabel: latestActivityLabel,
                                 activityCount: activityCount,
+                                activityTimeline: activityTimeline.length > 0 ? activityTimeline : i.activityTimeline,
                                 status: details.status || i.status
                             } : i));
                         } catch (err) {
@@ -464,6 +527,7 @@
                     const latestActivityDate = latestActivity?.dateIso || currentItem?.latestActivityDate || null;
                     const latestActivityLabel = latestActivity?.label || currentItem?.latestActivityLabel || null;
 
+                    const activityTimeline = extractActivityTimeline(details);
                     setHearingData(prev => ({ ...prev, [itemId]: { ...hearing, checkedAt: now } }));
                     setItems(prev => prev.map(i => i.id === itemId ? {
                         ...i,
@@ -472,6 +536,7 @@
                         latestActivityDate: latestActivityDate,
                         latestActivityLabel: latestActivityLabel,
                         activityCount: activityCount,
+                        activityTimeline: activityTimeline.length > 0 ? activityTimeline : i.activityTimeline,
                         status: details.status || i.status
                     } : i));
                     await supabase.from('tracked_items').update({
@@ -484,6 +549,7 @@
                         latest_activity_date: latestActivityDate,
                         latest_activity_label: latestActivityLabel,
                         activity_count: activityCount,
+                        activity_timeline: activityTimeline.length > 0 ? activityTimeline : null,
                         ...(details.status ? { status: details.status } : {})
                     }).eq('id', itemId);
                 } catch (err) { console.error(`Error checking hearing for ${itemId}:`, err); }
@@ -1478,7 +1544,7 @@
                                                             </div>
                                                             <p className="text-sm text-gray-600 mb-2">{item.description}</p>
 
-                                                            {(statusHistory[item.id] || []).length > 0 && (
+                                                            {(item.activityTimeline || []).length > 0 && (
                                                                 <div className="mb-2">
                                                                     <button
                                                                         onClick={() => setExpandedHistory(prev => {
@@ -1488,17 +1554,17 @@
                                                                         })}
                                                                         className="text-xs text-gray-400 hover:text-gray-600 font-medium"
                                                                     >
-                                                                        {expandedHistory.has(item.id) ? '▲ Hide status history' : `▼ Status history (${(statusHistory[item.id] || []).length})`}
+                                                                        {expandedHistory.has(item.id) ? '▲ Hide activity timeline' : `▼ Activity timeline (${(item.activityTimeline || []).length} events)`}
                                                                     </button>
                                                                     {expandedHistory.has(item.id) && (
                                                                         <div className="mt-1 p-2 bg-gray-50 border border-gray-200 rounded">
-                                                                            {(statusHistory[item.id] || []).map((h, idx) => (
-                                                                                <div key={idx} className="flex items-start gap-1 text-xs py-1 border-b border-gray-100 last:border-0 flex-wrap">
-                                                                                    <span className="text-gray-400 whitespace-nowrap">{new Date(h.changed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                                                                                    <span className="text-gray-400 line-through">{h.old_status}</span>
-                                                                                    <span className="text-gray-400">→</span>
-                                                                                    <span className="text-gray-700 font-medium">{h.new_status}</span>
-                                                                                    {h.change_label && <span className="text-gray-400 italic">· {h.change_label}</span>}
+                                                                            {(item.activityTimeline || []).map((e, idx) => (
+                                                                                <div key={idx} className={`flex items-start gap-2 text-xs py-1 border-b border-gray-100 last:border-0 ${e.isFuture ? 'opacity-60' : ''}`}>
+                                                                                    <span className="text-gray-400 whitespace-nowrap w-28 shrink-0">{e.dateStr}</span>
+                                                                                    <span className={`font-medium ${e.isFuture ? 'text-amber-600' : 'text-gray-700'}`}>
+                                                                                        {e.isFuture ? '📅 ' : ''}{e.label}
+                                                                                    </span>
+                                                                                    {e.extra && <span className="text-gray-400 italic">· {e.extra}</span>}
                                                                                 </div>
                                                                             ))}
                                                                         </div>
