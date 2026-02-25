@@ -109,8 +109,8 @@ export default async function handler(req, res) {
                 <tr>
                     <td style="padding: 2px 8px 2px 0; color: #6b7280;">Status</td>
                     <td style="padding: 2px 0; color: #374151;">${item.status || '—'}</td>
-                    <td style="padding: 2px 8px 2px 16px; color: #6b7280;">Assigned</td>
-                    <td style="padding: 2px 0; color: #374151;">${item.assigned_to || 'Unassigned'}</td>
+                    <td style="padding: 2px 8px 2px 16px; color: #6b7280;">Committee</td>
+                    <td style="padding: 2px 0; color: #374151;">${item.referred_to_committees && item.referred_to_committees !== 'null' ? item.referred_to_committees : '—'}</td>
                 </tr>
                 ${item.introduced_by ? `<tr><td style="padding: 2px 8px 2px 0; color: #6b7280;">Sponsor</td><td colspan="3" style="padding: 2px 0; color: #374151;">${item.introduced_by}</td></tr>` : ''}
                 ${item.latest_activity_date && item.latest_activity_label ? `<tr><td style="padding: 2px 8px 2px 0; color: #6b7280; white-space: nowrap;">Last Activity</td><td colspan="3" style="padding: 2px 0; color: #374151;">${item.latest_activity_label} &mdash; ${formatDate(item.latest_activity_date)}</td></tr>` : ''}
@@ -169,8 +169,8 @@ export default async function handler(req, res) {
                         <tr>
                             <td style="padding: 2px 8px 2px 0; color: #6b7280;">Bill</td>
                             <td style="padding: 2px 0; color: #374151;">${item.bill_number || item.id}</td>
-                            <td style="padding: 2px 8px 2px 16px; color: #6b7280;">Assigned</td>
-                            <td style="padding: 2px 0; color: #374151;">${item.assigned_to || 'Unassigned'}</td>
+                            <td style="padding: 2px 8px 2px 16px; color: #6b7280;">Committee</td>
+                            <td style="padding: 2px 0; color: #374151;">${item.referred_to_committees && item.referred_to_committees !== 'null' ? item.referred_to_committees : '—'}</td>
                         </tr>
                         <tr>
                             <td style="padding: 2px 8px 2px 0; color: #6b7280;">Status</td>
@@ -201,12 +201,6 @@ export default async function handler(req, res) {
         <div style="${sectionStyle} background: #eff6ff; border: 1px solid #93c5fd;">
             <h2 style="margin: 0 0 12px; font-size: 15px; color: #1e40af;">🔵 Monitor & Assess (${monitorAndAssess.length})</h2>
             ${monitorAndAssess.map(item => renderItem(item)).join('')}
-        </div>` : ''}
-
-        ${completed.length > 0 ? `
-        <div style="${sectionStyle} background: #f0fdf4; border: 1px solid #86efac;">
-            <h2 style="margin: 0 0 12px; font-size: 15px; color: #166534;">✅ Action Completed (${completed.length})</h2>
-            ${completed.map(item => renderItem(item)).join('')}
         </div>` : ''}
 
         <div style="margin-top: 24px; padding: 12px; text-align: center; font-size: 11px; color: #9ca3af;">
