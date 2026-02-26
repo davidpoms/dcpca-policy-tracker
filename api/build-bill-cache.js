@@ -115,8 +115,6 @@ export default async function handler(req, res) {
     if (!cursor) {
         console.log('[build-bill-cache] No cursor found — collecting all bill numbers by category...');
 
-        // Only cache categories that have sponsors (Bills and Resolutions)
-        // Hearing notices/roundtables don't have introducers so skip them
         const CATEGORY_IDS = [1, 6]; // 1=Bill, 6=Resolution
         const seen = new Set();
         const allBillNumbers = [];
@@ -153,6 +151,13 @@ export default async function handler(req, res) {
         };
         await sbUpsert('lims_cache_cursor', cursor);
         console.log(`[build-bill-cache] Cursor initialized with ${allBillNumbers.length} bills`);
+
+        // Return immediately — next call will start processing details
+        return res.status(200).json({
+            status: 'initialized',
+            total: allBillNumbers.length,
+            message: 'Bill list collected. Call again to start processing details.'
+        });
     }
 
     if (cursor.completed) {
