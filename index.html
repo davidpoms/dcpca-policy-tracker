@@ -607,16 +607,25 @@
                     if ((searchMode === 'all' || searchMode === 'committees') && trackedCommittees.length > 0) {
                         for (const committee of trackedCommittees) {
                             try {
-                                const results = await proxyFetch('/SearchLegislation', 'POST', {
-                                    Keyword: committee, CategoryId: 0,
-                                    CouncilPeriodId: selectedPeriod.councilPeriodId, RowLimit: 50, OffSet: 0
-                                });
-                                allResults.push(Array.isArray(results) ? results.filter(leg => {
-                                    const cs = leg.referredToCommittees;
-                                    return cs && cs !== 'null' && cs.toLowerCase().includes(committee.toLowerCase());
-                                }) : []);
+                                const { data, error } = await supabase
+                                    .from('lims_bill_cache')
+                                    .select('*')
+                                    .eq('council_period_id', selectedPeriod.councilPeriodId)
+                                    .ilike('committees', `%${committee}%`);
+                                if (error) throw error;
+                                allResults.push((data || []).map(row => ({
+                                    legislationNumber: row.bill_number,
+                                    title: row.title,
+                                    category: row.category,
+                                    status: row.status,
+                                    introducers: row.introduced_by,
+                                    coIntroducers: row.co_introducers,
+                                    referredToCommittees: row.committees,
+                                    introductionDate: row.introduction_date,
+                                    shortDescription: row.title
+                                })));
+                                console.log(`[committee search] "${committee}" → ${(data || []).length} matches from cache`);
                             } catch (err) { console.error(`Error searching committee "${committee}":`, err); allResults.push([]); }
-                            await delay(1000);
                         }
                     }
                     if ((searchMode === 'all' || searchMode === 'sponsors') && trackedSponsors.length > 0) {
@@ -713,6 +722,8 @@
                         return item;
                     });
                     setItems([...existingTrackedItems, ...mergedItems]);
+                    setCurrentSearchCategory('search');
+                    setHasMoreResults(false); // keyword/committee/sponsor searches load all results at once
                     setLoading(false);
                 } catch (err) {
                     console.error('Error in refreshData:', err);
