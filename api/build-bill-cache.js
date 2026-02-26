@@ -85,7 +85,7 @@ async function limsGet(endpoint) {
     });
     if (!r.ok) throw new Error(`Proxy GET ${endpoint}: ${r.status}`);
     const data = await r.json();
-    if (data.error) throw new Error(data.error);
+    if (data.error) return null; // bill doesn't exist, skip silently
     return data;
 }
 
@@ -113,31 +113,19 @@ export default async function handler(req, res) {
     let cursor = cursorRows[0];
 
     if (!cursor) {
-        console.log('[build-bill-cache] No cursor found — collecting all bill numbers by category...');
+        console.log('[build-bill-cache] No cursor found — generating bill numbers by iteration...');
 
-        const CATEGORY_IDS = [1, 6]; // 1=Bill, 6=Resolution
-        const seen = new Set();
+        // Since SearchLegislation caps results, generate bill numbers directly
+        // Fetch a wide range and let LegislationDetails calls skip 404s
         const allBillNumbers = [];
+        const MAX_BILL = 1500;  // B26 bills
+        const MAX_RES  = 1000;  // PR26 resolutions
 
-        for (const categoryId of CATEGORY_IDS) {
-            let offset = 0;
-            while (true) {
-                const page = await limsPost('/SearchLegislation', {
-                    Keyword: '', CategoryId: categoryId,
-                    CouncilPeriodId: COUNCIL_PERIOD, RowLimit: PAGE_SIZE, OffSet: offset
-                });
-                if (!Array.isArray(page) || page.length === 0) break;
-                page.forEach(b => {
-                    if (b.legislationNumber && !seen.has(b.legislationNumber)) {
-                        seen.add(b.legislationNumber);
-                        allBillNumbers.push(b.legislationNumber);
-                    }
-                });
-                console.log(`[build-bill-cache] Category ${categoryId}: offset ${offset}, total so far: ${allBillNumbers.length}`);
-                if (page.length < PAGE_SIZE) break;
-                offset += PAGE_SIZE;
-                await delay(800);
-            }
+        for (let i = 1; i <= MAX_BILL; i++) {
+            allBillNumbers.push(`B26-${String(i).padStart(4, '0')}`);
+        }
+        for (let i = 1; i <= MAX_RES; i++) {
+            allBillNumbers.push(`PR26-${String(i).padStart(4, '0')}`);
         }
 
         cursor = {
@@ -150,13 +138,13 @@ export default async function handler(req, res) {
             updated_at: new Date().toISOString()
         };
         await sbUpsert('lims_cache_cursor', cursor);
-        console.log(`[build-bill-cache] Cursor initialized with ${allBillNumbers.length} bills`);
+        console.log(`[build-bill-cache] Cursor initialized with ${allBillNumbers.length} candidates`);
 
         // Return immediately — next call will start processing details
         return res.status(200).json({
             status: 'initialized',
             total: allBillNumbers.length,
-            message: 'Bill list collected. Call again to start processing details.'
+            message: 'Bill number list generated. Call again to start processing details.'
         });
     }
 
@@ -179,6 +167,13 @@ export default async function handler(req, res) {
     for (const billNum of batch) {
         try {
             const details = await limsGet(`/LegislationDetails/${billNum}`);
+
+            // Skip if not found or empty response
+            if (!details || !details.title) {
+                stats.skipped = (stats.skipped || 0) + 1;
+                await delay(300); // shorter delay for misses
+                continue;
+            }
 
             await sbUpsert('lims_bill_cache', {
                 bill_number: billNum,
