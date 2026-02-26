@@ -100,26 +100,46 @@ export default async function handler(req, res) {
     const isManual = CRON_SECRET && req.headers['authorization'] === `Bearer ${CRON_SECRET}`;
     if (!isVercelCron && !isManual) return res.status(401).json({ error: 'Unauthorized' });
 
+    const reset = req.query?.reset === 'true' || req.body?.reset === true;
+    if (reset) {
+        await fetch(`${SUPABASE_URL}/rest/v1/lims_cache_cursor?council_period_id=eq.${COUNCIL_PERIOD}`, {
+            method: 'DELETE', headers: sbHeaders
+        });
+        console.log('[build-bill-cache] Cursor reset');
+    }
+
     // ── Load or initialize cursor ─────────────────────────────────────────────
     let cursorRows = await sbGet(`/lims_cache_cursor?council_period_id=eq.${COUNCIL_PERIOD}`);
     let cursor = cursorRows[0];
 
     if (!cursor) {
-        console.log('[build-bill-cache] No cursor found — collecting all bill numbers...');
+        console.log('[build-bill-cache] No cursor found — collecting all bill numbers by category...');
 
+        // Only cache categories that have sponsors (Bills and Resolutions)
+        // Hearing notices/roundtables don't have introducers so skip them
+        const CATEGORY_IDS = [1, 6]; // 1=Bill, 6=Resolution
+        const seen = new Set();
         const allBillNumbers = [];
-        let offset = 0;
-        while (true) {
-            const page = await limsPost('/SearchLegislation', {
-                Keyword: '', CategoryId: 0,
-                CouncilPeriodId: COUNCIL_PERIOD, RowLimit: PAGE_SIZE, OffSet: offset
-            });
-            if (!Array.isArray(page) || page.length === 0) break;
-            allBillNumbers.push(...page.map(b => b.legislationNumber).filter(Boolean));
-            console.log(`[build-bill-cache] Collected ${allBillNumbers.length} bills so far...`);
-            if (page.length < PAGE_SIZE) break;
-            offset += PAGE_SIZE;
-            await delay(800);
+
+        for (const categoryId of CATEGORY_IDS) {
+            let offset = 0;
+            while (true) {
+                const page = await limsPost('/SearchLegislation', {
+                    Keyword: '', CategoryId: categoryId,
+                    CouncilPeriodId: COUNCIL_PERIOD, RowLimit: PAGE_SIZE, OffSet: offset
+                });
+                if (!Array.isArray(page) || page.length === 0) break;
+                page.forEach(b => {
+                    if (b.legislationNumber && !seen.has(b.legislationNumber)) {
+                        seen.add(b.legislationNumber);
+                        allBillNumbers.push(b.legislationNumber);
+                    }
+                });
+                console.log(`[build-bill-cache] Category ${categoryId}: offset ${offset}, total so far: ${allBillNumbers.length}`);
+                if (page.length < PAGE_SIZE) break;
+                offset += PAGE_SIZE;
+                await delay(800);
+            }
         }
 
         cursor = {
