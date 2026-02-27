@@ -107,7 +107,7 @@ export default async function handler(req, res) {
                         </td>
                         <td style="${rowStyle} color: #374151;">${item.status || '—'}</td>
                         <td style="${rowStyle} color: #374151; font-size: 12px;">${activityStr}</td>
-                        <td style="${rowStyle} color: #374151;">${item.referred_to_committees && item.referred_to_committees !== 'null' ? item.referred_to_committees : '—'}</td>
+                        <td style="${rowStyle} color: #374151;">${item.committees && item.committees.length > 0 ? (Array.isArray(item.committees) ? item.committees.join(', ') : item.committees) : '—'}</td>
                         ${showHearing ? `<td style="${rowStyle} ${hearing ? 'color: #d97706; font-weight: 600;' : 'color: #9ca3af;'}">${hearing ? `📅 ${formatDate(item.next_hearing_date)}` : '—'}</td>` : ''}
                     </tr>`;
                 }).join('')}
