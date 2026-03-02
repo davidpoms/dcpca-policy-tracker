@@ -198,7 +198,7 @@ export default async function handler(req, res) {
         ${withHearings.length > 0 ? `
         <div style="${sectionStyle} background: #fffbeb; border: 1px solid #fcd34d;">
             <h2 style="margin: 0 0 12px; font-size: 15px; color: #92400e;">📅 Upcoming Hearings</h2>
-            ${withHearings.map(item => renderItem(item, false)).join('')}
+            ${withHearings.map(item => renderItem(item, true)).join('')}
         </div>` : ''}
 
         ${actionNeeded.length > 0 ? `
