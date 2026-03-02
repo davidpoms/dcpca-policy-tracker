@@ -179,6 +179,7 @@ export default async function handler(req, res) {
     // ── 2. Check each tracked bill against LIMS ──────────────────────────────
 
     const statusChangeAlerts = []; // items whose status changed and need email
+    const hearingAlerts = [];      // items with newly scheduled hearings
 
     for (const item of trackedBills) {
         try {
@@ -191,6 +192,11 @@ export default async function handler(req, res) {
             const hearing = extractNextHearing(details);
             const reReferrals = details.committeeReReferral || [];
 
+            // Check for newly scheduled hearing
+            const prevHearingDate = item.next_hearing_date ? new Date(item.next_hearing_date).toISOString().split('T')[0] : null;
+            const newHearingDate = hearing ? hearing.date.toISOString().split('T')[0] : null;
+            const hearingIsNew = newHearingDate && newHearingDate !== prevHearingDate;
+
             // Write status history if changed
             if (statusChanged) {
                 await sbInsert('bill_status_history', {
@@ -201,12 +207,30 @@ export default async function handler(req, res) {
                     changed_at: now.toISOString()
                 });
 
-                // Queue alert if item is action_needed or monitor_and_assess
                 if (item.action_status === 'action_needed' || item.action_status === 'monitor_and_assess') {
                     statusChangeAlerts.push({ item, oldStatus, newStatus, activity, hearing });
                 }
 
                 results.statusChanges.push({ id: item.id, title: item.title, oldStatus, newStatus });
+            }
+
+            // Queue hearing alert if new hearing scheduled (regardless of action_status)
+            if (hearingIsNew) {
+                // Record in status history so it shows in timeline and EOD report
+                await sbInsert('bill_status_history', {
+                    item_id: item.id,
+                    old_status: newStatus || oldStatus,
+                    new_status: newStatus || oldStatus,
+                    change_label: `Hearing Scheduled: ${hearing.type || 'Public Hearing'} on ${new Date(hearing.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
+                    changed_at: now.toISOString()
+                });
+
+                // Alert for action_needed and monitor_and_assess items
+                if (item.action_status === 'action_needed' || item.action_status === 'monitor_and_assess') {
+                    statusChangeAlerts.push({ item, oldStatus: null, newStatus: null, activity, hearing, isHearingAlert: true });
+                }
+
+                hearingAlerts.push({ item, hearing, activity });
             }
 
             // Update tracked_items
@@ -245,7 +269,7 @@ export default async function handler(req, res) {
             <div style="background: #fef2f2; padding: 16px 24px; border: 1px solid #fca5a5; border-top: none; border-radius: 0 0 10px 10px; margin-bottom: 16px;">
                 <p style="margin: 0; font-size: 13px; color: #7f1d1d;">${statusChangeAlerts.length} tracked bill${statusChangeAlerts.length > 1 ? 's have' : ' has'} a new LIMS status update.</p>
             </div>
-            ${statusChangeAlerts.map(({ item, oldStatus, newStatus, activity, hearing }) => `
+            ${statusChangeAlerts.map(({ item, oldStatus, newStatus, activity, hearing, isHearingAlert }) => `
             <div style="${itemStyle}">
                 <div style="font-size: 14px; font-weight: 600; color: #111827; margin-bottom: 8px;">
                     ${item.link ? `<a href="${item.link}" style="color: #4f46e5; text-decoration: none;">${item.title}</a>` : item.title}
@@ -257,6 +281,15 @@ export default async function handler(req, res) {
                         <td style="padding: 2px 8px 2px 16px; color: #6b7280;">Priority</td>
                         <td style="padding: 2px 0; color: #374151;">${item.priority || '—'}</td>
                     </tr>
+                    ${isHearingAlert ? `
+                    <tr>
+                        <td style="padding: 4px 8px 4px 0; color: #d97706; font-weight: 600;">📅 New Hearing</td>
+                        <td colspan="3" style="padding: 4px 0; color: #d97706; font-weight: 600;">${hearing.type || 'Public Hearing'} — ${formatDate(hearing.date.toISOString())}${hearing.location ? ' · ' + hearing.location : ''}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 2px 8px 2px 0; color: #6b7280;">Status</td>
+                        <td colspan="3" style="padding: 2px 0; color: #374151;">${item.status || '—'}</td>
+                    </tr>` : `
                     <tr>
                         <td style="padding: 4px 8px 4px 0; color: #6b7280; white-space: nowrap; vertical-align: top;">Old Status</td>
                         <td style="padding: 4px 0; color: #6b7280; text-decoration: line-through;">${oldStatus}</td>
@@ -268,8 +301,8 @@ export default async function handler(req, res) {
                         <td style="padding: 2px 0; color: #dc2626; font-weight: 600;">${newStatus}</td>
                         <td></td><td></td>
                     </tr>
+                    ${hearing ? `<tr><td style="padding: 4px 8px 2px 0; color: #d97706; font-weight: 600;">📅 Hearing</td><td colspan="3" style="padding: 4px 0; color: #d97706; font-weight: 600;">${formatDate(hearing.date.toISOString())}</td></tr>` : ''}`}
                     ${activity ? `<tr><td style="padding: 4px 8px 2px 0; color: #6b7280; white-space: nowrap;">Last Activity</td><td colspan="3" style="padding: 4px 0; color: #374151;">${activity.label} — ${formatDate(activity.dateIso)}</td></tr>` : ''}
-                    ${hearing ? `<tr><td style="padding: 4px 8px 2px 0; color: #d97706; font-weight: 600;">📅 Hearing</td><td colspan="3" style="padding: 4px 0; color: #d97706; font-weight: 600;">${formatDate(hearing.date.toISOString())}</td></tr>` : ''}
                 </table>
             </div>`).join('')}
             <div style="margin-top: 24px; text-align: center; font-size: 11px; color: #9ca3af;">
@@ -280,6 +313,50 @@ export default async function handler(req, res) {
         await sendEmail(
             `🔔 DC Policy Tracker — ${statusChangeAlerts.length} Status Change${statusChangeAlerts.length > 1 ? 's' : ''} Detected`,
             alertHtml
+        );
+    }
+
+    // ── 3b. Send hearing notice alert email ──────────────────────────────────
+
+    if (hearingAlerts.length > 0) {
+        const itemStyle = 'margin: 12px 0; padding: 12px; border-radius: 6px; background: white; border: 1px solid #fcd34d;';
+        const hearingHtml = `
+        <!DOCTYPE html><html><head><meta charset="utf-8"></head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 680px; margin: 0 auto; padding: 24px; background: #f9fafb;">
+            <div style="background: #d97706; color: white; padding: 16px 24px; border-radius: 10px 10px 0 0;">
+                <h1 style="margin: 0; font-size: 18px;">📅 DC Policy Tracker — New Hearing${hearingAlerts.length > 1 ? 's' : ''} Scheduled</h1>
+                <p style="margin: 4px 0 0; font-size: 12px; opacity: 0.85;">${now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
+            </div>
+            <div style="background: #fffbeb; padding: 16px 24px; border: 1px solid #fcd34d; border-top: none; border-radius: 0 0 10px 10px; margin-bottom: 16px;">
+                <p style="margin: 0; font-size: 13px; color: #78350f;">${hearingAlerts.length} tracked bill${hearingAlerts.length > 1 ? 's have' : ' has'} a new hearing scheduled.</p>
+            </div>
+            ${hearingAlerts.map(({ item, hearing, activity }) => `
+            <div style="${itemStyle}">
+                <div style="font-size: 14px; font-weight: 600; color: #111827; margin-bottom: 8px;">
+                    ${item.link ? `<a href="${item.link}" style="color: #4f46e5; text-decoration: none;">${item.title}</a>` : item.title}
+                </div>
+                <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+                    <tr>
+                        <td style="padding: 2px 8px 2px 0; color: #6b7280; white-space: nowrap;">Bill</td>
+                        <td style="padding: 2px 0; color: #374151;">${item.bill_number || item.id}</td>
+                        <td style="padding: 2px 8px 2px 16px; color: #6b7280;">Status</td>
+                        <td style="padding: 2px 0; color: #374151;">${item.status || '—'}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 4px 8px 4px 0; color: #d97706; font-weight: 600; white-space: nowrap;">📅 Hearing</td>
+                        <td colspan="3" style="padding: 4px 0; color: #d97706; font-weight: 600;">${formatDate(hearing.date.toISOString())} — ${hearing.type || 'Hearing'}${hearing.location ? ' · ' + hearing.location : ''}</td>
+                    </tr>
+                    ${activity ? `<tr><td style="padding: 2px 8px 2px 0; color: #6b7280; white-space: nowrap;">Last Activity</td><td colspan="3" style="padding: 2px 0; color: #374151;">${activity.label} — ${formatDate(activity.dateIso)}</td></tr>` : ''}
+                </table>
+            </div>`).join('')}
+            <div style="margin-top: 24px; text-align: center; font-size: 11px; color: #9ca3af;">
+                DC Policy Tracker · <a href="https://dcpca-policy-tracker.vercel.app" style="color: #9ca3af;">Open Tracker</a>
+            </div>
+        </body></html>`;
+
+        await sendEmail(
+            `📅 DC Policy Tracker — ${hearingAlerts.length} New Hearing${hearingAlerts.length > 1 ? 's' : ''} Scheduled`,
+            hearingHtml
         );
     }
 
@@ -371,6 +448,9 @@ export default async function handler(req, res) {
         }
     }
 
+    console.log(`[check-hearings] Done: ${results.checked} checked, ${results.statusChanges.length} status changes, ${results.newKeywordMatches.length} new keyword matches`);
+    return res.status(200).json(results);
+}
     console.log(`[check-hearings] Done: ${results.checked} checked, ${results.statusChanges.length} status changes, ${results.newKeywordMatches.length} new keyword matches`);
     return res.status(200).json(results);
 }
