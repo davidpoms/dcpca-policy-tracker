@@ -36,8 +36,10 @@ export default async function handler(req, res) {
     const isManual = CRON_SECRET && req.headers['authorization'] === `Bearer ${CRON_SECRET}`;
     if (!isVercelCron && !isManual) return res.status(401).json({ error: 'Unauthorized' });
     if (!GMAIL_USER || !GMAIL_APP_PASSWORD || !DAILY_REPORT_TO) {
-        return res.status(500).json({ error: 'Missing email config' });
+        return res.status(500).json({ error: 'Missing email config', vars: { GMAIL_USER: !!GMAIL_USER, GMAIL_APP_PASSWORD: !!GMAIL_APP_PASSWORD, DAILY_REPORT_TO: !!DAILY_REPORT_TO } });
     }
+
+    try {
 
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
@@ -46,7 +48,11 @@ export default async function handler(req, res) {
         `/bill_status_history?changed_at=gte.${encodeURIComponent(todayStart)}&order=changed_at.desc`
     );
 
-    if (todaysHistory.length === 0) {
+    const newlyTracked = await supabaseGet(
+        `/tracked_items?tracked_at=gte.${encodeURIComponent(todayStart)}&order=tracked_at.desc`
+    );
+
+    if (todaysHistory.length === 0 && newlyTracked.length === 0) {
         console.log('[send-eod-report] No updates today — skipping email');
         return res.status(200).json({ sent: false, reason: 'no_updates' });
     }
@@ -111,6 +117,35 @@ export default async function handler(req, res) {
         (historyByItem[item.id] || []).some(h => h.change_label && h.change_label.startsWith('Hearing Scheduled'))
     );
 
+    const itemStyleNew = 'margin: 12px 0; padding: 12px; border-radius: 6px; background: white; border: 1px solid #a5b4fc;';
+    const renderNewItem = (item) => {
+        const note = notesMap[item.id];
+        const hasHearing = item.next_hearing_date && new Date(item.next_hearing_date) >= todayStartDate;
+        return `
+        <div style="${itemStyleNew}">
+            <div style="font-size: 14px; font-weight: 600; color: #111827; margin-bottom: 8px;">
+                ${item.link ? `<a href="${item.link}" style="color: #4f46e5; text-decoration: none;">${item.title}</a>` : item.title}
+            </div>
+            <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+                <tr>
+                    <td style="padding: 2px 8px 2px 0; color: #6b7280; white-space: nowrap;">Bill</td>
+                    <td style="padding: 2px 0; color: #374151;">${item.bill_number || item.id}</td>
+                    <td style="padding: 2px 8px 2px 16px; color: #6b7280;">Status</td>
+                    <td style="padding: 2px 0; color: #374151;">${item.status || '—'}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 2px 8px 2px 0; color: #6b7280;">Category</td>
+                    <td style="padding: 2px 0; color: #374151;">${item.category || '—'}</td>
+                    <td style="padding: 2px 8px 2px 16px; color: #6b7280;">Priority</td>
+                    <td style="padding: 2px 0; color: #374151;">${item.priority || '—'}</td>
+                </tr>
+                ${item.introduced_by ? `<tr><td style="padding: 2px 8px 2px 0; color: #6b7280;">Sponsor</td><td colspan="3" style="padding: 2px 0; color: #374151;">${item.introduced_by}</td></tr>` : ''}
+                ${hasHearing ? `<tr><td style="padding: 4px 8px 2px 0; color: #d97706; font-weight: 600;">📅 Hearing</td><td colspan="3" style="padding: 4px 0; color: #d97706; font-weight: 600;">${formatDate(item.next_hearing_date)}</td></tr>` : ''}
+                ${note ? `<tr><td style="padding: 4px 8px 2px 0; color: #6b7280; vertical-align: top;">Note</td><td colspan="3" style="padding: 4px 0; color: #374151; font-style: italic;">${note}</td></tr>` : ''}
+            </table>
+        </div>`;
+    };
+
     const html = `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
@@ -126,9 +161,13 @@ export default async function handler(req, res) {
                     <div style="font-size: 28px; font-weight: 700; color: #dc2626;">${statusChanges.length}</div>
                     <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Status Changes</div>
                 </td>
-                <td style="padding: 8px;">
+                <td style="padding: 8px; border-right: 1px solid #e5e7eb;">
                     <div style="font-size: 28px; font-weight: 700; color: #d97706;">${hearingChanges.length}</div>
                     <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">New Hearings</div>
+                </td>
+                <td style="padding: 8px;">
+                    <div style="font-size: 28px; font-weight: 700; color: #4f46e5;">${newlyTracked.length}</div>
+                    <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Newly Tracked</div>
                 </td>
             </tr>
         </table>
@@ -146,6 +185,12 @@ export default async function handler(req, res) {
         ${hearingChanges.map(item => renderChangedItem(item)).join('')}
     </div>` : ''}
 
+    ${newlyTracked.length > 0 ? `
+    <div style="margin-bottom: 24px; padding: 16px; background: #eef2ff; border: 1px solid #a5b4fc; border-radius: 8px;">
+        <h2 style="margin: 0 0 12px; font-size: 15px; color: #3730a3;">➕ Newly Tracked Today (${newlyTracked.length})</h2>
+        ${newlyTracked.map(item => renderNewItem(item)).join('')}
+    </div>` : ''}
+
     <div style="margin-top: 24px; padding: 12px; text-align: center; font-size: 11px; color: #9ca3af;">
         DC Policy Tracker &middot; <a href="https://dcpca-policy-tracker.vercel.app" style="color: #9ca3af;">Open Tracker</a>
     </div>
@@ -161,10 +206,15 @@ export default async function handler(req, res) {
     await transporter.sendMail({
         from: `"DC Policy Tracker" <${GMAIL_USER}>`,
         to: toAddresses.join(', '),
-        subject: `📋 DC Policy EOD — ${statusChanges.length} status change${statusChanges.length !== 1 ? 's' : ''}, ${hearingChanges.length} new hearing${hearingChanges.length !== 1 ? 's' : ''} · ${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+        subject: `📋 DC Policy EOD — ${statusChanges.length} status change${statusChanges.length !== 1 ? 's' : ''}, ${hearingChanges.length} new hearing${hearingChanges.length !== 1 ? 's' : ''}, ${newlyTracked.length} newly tracked · ${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
         html
     });
 
     console.log(`[send-eod-report] Sent — ${statusChanges.length} status changes, ${hearingChanges.length} new hearings`);
     return res.status(200).json({ sent: true, statusChanges: statusChanges.length, hearingChanges: hearingChanges.length });
+
+    } catch (err) {
+        console.error('[send-eod-report] Fatal error:', err);
+        return res.status(500).json({ error: err.message, stack: err.stack });
+    }
 }
