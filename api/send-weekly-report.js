@@ -143,7 +143,7 @@ export default async function handler(req, res) {
         ${withHearings.length > 0 ? `
         <div style="margin-bottom: 24px;">
             <h2 style="font-size: 15px; font-weight: 700; color: #92400e; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 2px solid #fcd34d;">📅 Upcoming Hearings</h2>
-            ${renderTable(withHearings, false)}
+            ${renderTable(withHearings, true)}
         </div>` : ''}
 
         ${recentlyUpdated.length > 0 ? `
