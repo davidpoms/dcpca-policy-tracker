@@ -51,9 +51,15 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: 'Missing GMAIL_USER, GMAIL_APP_PASSWORD, or DAILY_REPORT_TO' });
     }
 
+    try {
     const items = await supabaseGet('/tracked_items?select=*&order=tracked_at.desc');
     const notes = await supabaseGet('/item_notes?select=*');
-    const statusHistory = await supabaseGet('/bill_status_history?select=*&order=changed_at.desc');
+    let statusHistory = [];
+    try {
+        statusHistory = await supabaseGet('/bill_status_history?select=*&order=changed_at.desc');
+    } catch (err) {
+        console.warn('[daily-report] Could not load bill_status_history:', err.message);
+    }
 
     const notesMap = {};
     notes.forEach(n => { notesMap[n.item_id] = n.note_text; });
@@ -232,7 +238,9 @@ export default async function handler(req, res) {
 
     console.log(`[daily-report] Sent to ${DAILY_REPORT_TO}`);
     return res.status(200).json({ sent: true, to: DAILY_REPORT_TO });
-}
-    console.log(`[daily-report] Sent to ${DAILY_REPORT_TO}`);
-    return res.status(200).json({ sent: true, to: DAILY_REPORT_TO });
+
+    } catch (err) {
+        console.error('[daily-report] Fatal error:', err);
+        return res.status(500).json({ error: err.message, stack: err.stack });
+    }
 }
