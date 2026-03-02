@@ -131,6 +131,7 @@ export default async function handler(req, res) {
                 ['Action Needed', actionNeeded.length, '#dc2626', '#fef2f2'],
                 ['Monitor & Assess', monitorAndAssess.length, '#2563eb', '#eff6ff'],
                 ['Upcoming Hearings', withHearings.length, '#d97706', '#fffbeb'],
+                ['Recent Updates', recentlyUpdated.length, '#16a34a', '#f0fdf4'],
                 ['Total Tracked', items.length, '#374151', '#f3f4f6']
             ].map(([label, count, color, bg]) => `
             <div style="flex: 1; padding: 16px; background: ${bg}; border-radius: 8px; text-align: center;">
