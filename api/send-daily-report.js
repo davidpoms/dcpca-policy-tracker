@@ -146,9 +146,13 @@ export default async function handler(req, res) {
                         <div style="font-size: 28px; font-weight: 700; color: #d97706;">${withHearings.length}</div>
                         <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Upcoming Hearings</div>
                     </td>
+                    <td style="padding: 8px; border-right: 1px solid #e5e7eb;">
+                        <div style="font-size: 28px; font-weight: 700; color: #16a34a;">${recentlyUpdated.length}</div>
+                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Recent Updates</div>
+                    </td>
                     <td style="padding: 8px;">
-                        <div style="font-size: 28px; font-weight: 700; color: #16a34a;">${completed.length}</div>
-                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Completed</div>
+                        <div style="font-size: 28px; font-weight: 700; color: #374151;">${items.length}</div>
+                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Total Tracked</div>
                     </td>
                 </tr>
             </table>
@@ -226,6 +230,9 @@ export default async function handler(req, res) {
         html
     });
 
+    console.log(`[daily-report] Sent to ${DAILY_REPORT_TO}`);
+    return res.status(200).json({ sent: true, to: DAILY_REPORT_TO });
+}
     console.log(`[daily-report] Sent to ${DAILY_REPORT_TO}`);
     return res.status(200).json({ sent: true, to: DAILY_REPORT_TO });
 }
