@@ -36,6 +36,13 @@ function formatDate(iso) {
     return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
+function formatChangeLabel(h) {
+    if (h.change_label && h.change_label !== 'Backfill — status at time of migration') return h.change_label;
+    if (h.old_status && h.new_status && h.old_status !== h.new_status) return `${h.old_status} → ${h.new_status}`;
+    if (h.new_status) return h.new_status;
+    return '(updated)';
+}
+
 export default async function handler(req, res) {
     const isVercelCron = req.headers['x-vercel-cron'] === '1';
     const isManual = CRON_SECRET && req.headers['authorization'] === `Bearer ${CRON_SECRET}`;
@@ -52,7 +59,7 @@ export default async function handler(req, res) {
     const sinceLastWeeklyRun = new Date(now);
     sinceLastWeeklyRun.setDate(sinceLastWeeklyRun.getDate() - 7);
     sinceLastWeeklyRun.setHours(22, 0, 0, 0);
-    const weeklyRecentChanges = statusHistory.filter(h => new Date(h.changed_at) >= sinceLastWeeklyRun);
+    const weeklyRecentChanges = statusHistory.filter(h => new Date(h.changed_at) >= sinceLastWeeklyRun && h.change_label !== 'Backfill — status at time of migration');
     const changesSinceLastRun = weeklyRecentChanges.length;
 
     const weeklyHighlightBlock = changesSinceLastRun > 0 ? (() => {
@@ -63,7 +70,7 @@ export default async function handler(req, res) {
             const billLink = item.link
                 ? `<a href="${item.link}" style="color:#4f46e5;text-decoration:none;">${item.bill_number || item.id}</a>`
                 : (item.bill_number || item.id);
-            const changeLabels = changes.map(h => h.change_label || `${h.old_status} → ${h.new_status}`).join('<br>');
+            const changeLabels = changes.map(h => formatChangeLabel(h)).join('<br>');
             return `<tr style="border-bottom:1px solid #fde047;">
                 <td style="padding:6px 8px 6px 0;color:#4f46e5;font-weight:500;white-space:nowrap;">${billLink}</td>
                 <td style="padding:6px 8px;color:#374151;font-size:11px;">${item.title}</td>
@@ -185,7 +192,6 @@ export default async function handler(req, res) {
                         <th style="${thStyle}">Status</th>
                         <th style="${thStyle}">Status Since</th>
                         <th style="${thStyle}">Latest Activity</th>
-                        <th style="${thStyle}">Source</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -209,9 +215,8 @@ export default async function handler(req, res) {
                             <td style="${rowStyle} color: #374151; font-size: 12px;">
                                 ${item.latest_activity_label ? `<span style="color:#166534;font-weight:600;">${item.latest_activity_label}</span><br>` : ''}
                                 ${item.latest_activity_date ? `<span style="color:#9ca3af">${formatDate(item.latest_activity_date)}</span>` : '—'}
-                                ${recentChanges.length > 0 ? `<br><span style="color:#6b7280;font-size:11px;">${recentChanges.map(h => `${h.old_status} → ${h.new_status}`).join('; ')}</span>` : ''}
+                                ${recentChanges.length > 0 ? `<br><span style="color:#6b7280;font-size:11px;">${recentChanges.map(h => formatChangeLabel(h)).join('; ')}</span>` : ''}
                             </td>
-                            <td style="${rowStyle} color: #374151;">${item.is_manual_entry ? '<span style="color:#7c3aed;">DC Register</span>' : 'LIMS'}</td>
                         </tr>`;
                     }).join('')}
                 </tbody>
