@@ -98,25 +98,42 @@ export default async function handler(req, res) {
     sinceLastRun.setDate(sinceLastRun.getDate() - 1);
     sinceLastRun.setHours(13, 30, 0, 0); // 8:30am ET = 13:30 UTC
     const recentChanges = statusHistory.filter(h => new Date(h.changed_at) >= sinceLastRun && h.change_label !== 'Backfill — status at time of migration');
-    const changesSinceLastRun = recentChanges.length;
+    const newlyTracked = items.filter(i => i.tracked_at && new Date(i.tracked_at) >= sinceLastRun);
     const recentChangeItemIds = [...new Set(recentChanges.map(h => h.item_id))];
+    // Exclude newly tracked items from change list to avoid double-showing
+    const newlyTrackedIds = new Set(newlyTracked.map(i => i.id));
+    const changesSinceLastRun = recentChanges.filter(h => !newlyTrackedIds.has(h.item_id)).length + newlyTracked.length;
 
     const highlightBlock = changesSinceLastRun > 0 ? (() => {
-        const recentChangeItems = recentChangeItemIds.map(id => items.find(i => i.id === id)).filter(Boolean);
-        const rows = recentChangeItems.map(item => {
-            const changes = recentChanges.filter(h => h.item_id === item.id);
-            const billLink = item.link
-                ? `<a href="${item.link}" style="color:#4f46e5;text-decoration:none;">${item.bill_number || item.id}</a>`
-                : (item.bill_number || item.id);
-            const changeLabels = changes.map(h => formatChangeLabel(h)).join('<br>');
-            return `<tr style="border-bottom:1px solid #fde047;">
-                <td style="padding:6px 8px 6px 0;color:#4f46e5;font-weight:500;white-space:nowrap;">${billLink}</td>
-                <td style="padding:6px 8px;color:#374151;font-size:11px;">${item.title}</td>
-                <td style="padding:6px 0;color:#854d0e;font-size:11px;white-space:nowrap;">${changeLabels}</td>
-            </tr>`;
-        }).join('');
+        const changedItems = recentChangeItemIds
+            .filter(id => !newlyTrackedIds.has(id))
+            .map(id => items.find(i => i.id === id)).filter(Boolean);
+        const rows = [
+            ...newlyTracked.map(item => {
+                const billLink = item.link
+                    ? `<a href="${item.link}" style="color:#4f46e5;text-decoration:none;">${item.bill_number || item.id}</a>`
+                    : (item.bill_number || item.id);
+                return `<tr style="border-bottom:1px solid #fde047;">
+                    <td style="padding:6px 8px 6px 0;color:#4f46e5;font-weight:500;white-space:nowrap;">${billLink}</td>
+                    <td style="padding:6px 8px;color:#374151;font-size:11px;">${item.title}</td>
+                    <td style="padding:6px 0;color:#16a34a;font-size:11px;white-space:nowrap;">➕ Newly tracked</td>
+                </tr>`;
+            }),
+            ...changedItems.map(item => {
+                const changes = recentChanges.filter(h => h.item_id === item.id);
+                const billLink = item.link
+                    ? `<a href="${item.link}" style="color:#4f46e5;text-decoration:none;">${item.bill_number || item.id}</a>`
+                    : (item.bill_number || item.id);
+                const changeLabels = changes.map(h => formatChangeLabel(h)).join('<br>');
+                return `<tr style="border-bottom:1px solid #fde047;">
+                    <td style="padding:6px 8px 6px 0;color:#4f46e5;font-weight:500;white-space:nowrap;">${billLink}</td>
+                    <td style="padding:6px 8px;color:#374151;font-size:11px;">${item.title}</td>
+                    <td style="padding:6px 0;color:#854d0e;font-size:11px;white-space:nowrap;">${changeLabels}</td>
+                </tr>`;
+            })
+        ].join('');
         return `<div style="margin-bottom:24px;padding:16px;background:#fefce8;border:1px solid #fde047;border-radius:8px;">
-            <h2 style="margin:0 0 12px;font-size:14px;font-weight:700;color:#854d0e;">⚡ ${changesSinceLastRun} change${changesSinceLastRun !== 1 ? 's' : ''} since yesterday</h2>
+            <h2 style="margin:0 0 12px;font-size:14px;font-weight:700;color:#854d0e;">⚡ ${changesSinceLastRun} update${changesSinceLastRun !== 1 ? 's' : ''} since yesterday</h2>
             <table style="width:100%;font-size:12px;border-collapse:collapse;">${rows}</table>
         </div>`;
     })() : '';
@@ -280,7 +297,7 @@ export default async function handler(req, res) {
     await transporter.sendMail({
         from: `DC Policy Tracker <${GMAIL_USER}>`,
         to: DAILY_REPORT_TO,
-        subject: `DC Policy Tracker ${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${changesSinceLastRun} change${changesSinceLastRun !== 1 ? 's' : ''} since yesterday · ${actionNeeded.length} action needed · ${withHearings.length} upcoming hearings`,
+        subject: `DC Policy Tracker ${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${changesSinceLastRun} update${changesSinceLastRun !== 1 ? 's' : ''} since yesterday · ${actionNeeded.length} action needed · ${withHearings.length} upcoming hearings`,
         html
     });
 
