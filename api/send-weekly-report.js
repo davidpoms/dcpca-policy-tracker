@@ -48,7 +48,11 @@ export default async function handler(req, res) {
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const thirtyDaysAgo = new Date(now); thirtyDaysAgo.setDate(now.getDate() - 30);
 
-    const actionNeeded = items.filter(i => i.action_status === 'action_needed');
+    // Changes since last Monday 5pm ET (22:00 UTC)
+    const sinceLastWeeklyRun = new Date(now);
+    sinceLastWeeklyRun.setDate(sinceLastWeeklyRun.getDate() - 7);
+    sinceLastWeeklyRun.setHours(22, 0, 0, 0);
+    const changesSinceLastRun = statusHistory.filter(h => new Date(h.changed_at) >= sinceLastWeeklyRun).length;
     const monitorAndAssess = items.filter(i => i.action_status === 'monitor_and_assess');
     const withHearings = items
         .filter(i => i.next_hearing_date && new Date(i.next_hearing_date) >= todayStart)
@@ -140,6 +144,32 @@ export default async function handler(req, res) {
             </div>`).join('')}
         </div>
 
+        </div>
+
+        ${changesSinceLastRun > 0 ? (() => {
+            const recentChanges = statusHistory.filter(h => new Date(h.changed_at) >= sinceLastWeeklyRun);
+            const recentItemIds = [...new Set(recentChanges.map(h => h.item_id))];
+            const recentChangeItems = recentItemIds.map(id => items.find(i => i.id === id)).filter(Boolean);
+            return `
+        <div style="margin-bottom: 24px; padding: 16px; background: #fefce8; border: 1px solid #fde047; border-radius: 8px;">
+            <h2 style="margin: 0 0 12px; font-size: 14px; font-weight: 700; color: #854d0e;">⚡ ${changesSinceLastRun} change${changesSinceLastRun !== 1 ? 's' : ''} this week</h2>
+            <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+                ${recentChangeItems.map(item => {
+                    const changes = recentChanges.filter(h => h.item_id === item.id);
+                    return `<tr style="border-bottom: 1px solid #fde047;">
+                        <td style="padding: 6px 8px 6px 0; color: #4f46e5; font-weight: 500; white-space: nowrap;">
+                            ${item.link ? `<a href="${item.link}" style="color: #4f46e5; text-decoration: none;">${item.bill_number || item.id}</a>` : (item.bill_number || item.id)}
+                        </td>
+                        <td style="padding: 6px 8px; color: #374151; font-size: 11px;">${item.title}</td>
+                        <td style="padding: 6px 0; color: #854d0e; font-size: 11px; white-space: nowrap;">
+                            ${changes.map(h => h.change_label || `${h.old_status} → ${h.new_status}`).join('<br>')}
+                        </td>
+                    </tr>`;
+                }).join('')}
+            </table>
+        </div>`;
+        })() : ''}
+
         ${withHearings.length > 0 ? `
         <div style="margin-bottom: 24px;">
             <h2 style="font-size: 15px; font-weight: 700; color: #92400e; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 2px solid #fcd34d;">📅 Upcoming Hearings</h2>
@@ -219,7 +249,7 @@ export default async function handler(req, res) {
         body: JSON.stringify({
             from: 'DC Policy Tracker <onboarding@resend.dev>', 
             to: toAddresses,
-            subject: `DC Policy Weekly · ${actionNeeded.length} action needed · ${withHearings.length} upcoming hearings · ${weekLabel}`,
+            subject: `DC Policy Tracker Week of ${weekLabel} · ${changesSinceLastRun} change${changesSinceLastRun !== 1 ? 's' : ''} this week · ${actionNeeded.length} action needed · ${withHearings.length} upcoming hearings`,
             html
         })
     });
