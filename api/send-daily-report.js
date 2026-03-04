@@ -39,6 +39,13 @@ function formatDate(iso) {
     return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function formatChangeLabel(h) {
+    if (h.change_label && h.change_label !== 'Backfill — status at time of migration') return h.change_label;
+    if (h.old_status && h.new_status && h.old_status !== h.new_status) return `${h.old_status} → ${h.new_status}`;
+    if (h.new_status) return h.new_status;
+    return '(updated)';
+}
+
 function priorityEmoji(p) {
     return { high: '🔴', medium: '🟡', low: '🟢' }[p] || '⚪';
 }
@@ -90,7 +97,7 @@ export default async function handler(req, res) {
     const sinceLastRun = new Date(now);
     sinceLastRun.setDate(sinceLastRun.getDate() - 1);
     sinceLastRun.setHours(13, 30, 0, 0); // 8:30am ET = 13:30 UTC
-    const recentChanges = statusHistory.filter(h => new Date(h.changed_at) >= sinceLastRun);
+    const recentChanges = statusHistory.filter(h => new Date(h.changed_at) >= sinceLastRun && h.change_label !== 'Backfill — status at time of migration');
     const changesSinceLastRun = recentChanges.length;
     const recentChangeItemIds = [...new Set(recentChanges.map(h => h.item_id))];
 
@@ -101,7 +108,7 @@ export default async function handler(req, res) {
             const billLink = item.link
                 ? `<a href="${item.link}" style="color:#4f46e5;text-decoration:none;">${item.bill_number || item.id}</a>`
                 : (item.bill_number || item.id);
-            const changeLabels = changes.map(h => h.change_label || `${h.old_status} → ${h.new_status}`).join('<br>');
+            const changeLabels = changes.map(h => formatChangeLabel(h)).join('<br>');
             return `<tr style="border-bottom:1px solid #fde047;">
                 <td style="padding:6px 8px 6px 0;color:#4f46e5;font-weight:500;white-space:nowrap;">${billLink}</td>
                 <td style="padding:6px 8px;color:#374151;font-size:11px;">${item.title}</td>
@@ -229,8 +236,7 @@ export default async function handler(req, res) {
                             <td style="padding: 2px 0; color: #374151;">${statusSinceLabel}</td>
                         </tr>
                         ${item.latest_activity_label && item.latest_activity_date ? `<tr><td style="padding: 2px 8px 2px 0; color: #16a34a; font-weight: 600;">Latest</td><td colspan="3" style="padding: 2px 0; color: #16a34a; font-weight: 600;">${item.latest_activity_label} — ${formatDate(item.latest_activity_date)}</td></tr>` : ''}
-                        ${item.is_manual_entry ? `<tr><td style="padding: 2px 8px 2px 0; color: #7c3aed; font-weight: 600;">Source</td><td colspan="3" style="padding: 2px 0; color: #7c3aed;">DC Register / Manual Entry</td></tr>` : ''}
-                        ${recentHistory.length > 0 ? `<tr><td style="padding: 4px 8px 2px 0; color: #6b7280; vertical-align: top;">Changes</td><td colspan="3" style="padding: 4px 0; color: #374151; font-size: 11px;">${recentHistory.map(h => `${h.old_status} → ${h.new_status}`).join('<br>')}</td></tr>` : ''}
+                        ${recentHistory.length > 0 ? `<tr><td style="padding: 4px 8px 2px 0; color: #6b7280; vertical-align: top;">Changes</td><td colspan="3" style="padding: 4px 0; color: #374151; font-size: 11px;">${recentHistory.map(h => formatChangeLabel(h)).join('<br>')}</td></tr>` : ''}
                         ${note ? `<tr><td style="padding: 4px 8px 2px 0; color: #6b7280; vertical-align: top;">Note</td><td colspan="3" style="padding: 4px 0; color: #374151; font-style: italic;">${note}</td></tr>` : ''}
                     </table>
                 </div>`;
