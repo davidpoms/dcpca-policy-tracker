@@ -154,6 +154,7 @@ export default async function handler(req, res) {
                     <tr>
                         <th style="${thStyle}">Bill / Title</th>
                         <th style="${thStyle}">Status</th>
+                        <th style="${thStyle}">Status Since</th>
                         <th style="${thStyle}">Latest Activity</th>
                         <th style="${thStyle}">Source</th>
                     </tr>
@@ -161,6 +162,9 @@ export default async function handler(req, res) {
                 <tbody>
                     ${recentlyUpdated.map((item, idx) => {
                         const recentChanges = (historyMap[item.id] || []).filter(h => new Date(h.changed_at) >= thirtyDaysAgo);
+                        const allHistory = (historyMap[item.id] || []).slice().sort((a, b) => new Date(a.changed_at) - new Date(b.changed_at));
+                        const statusSinceEntry = allHistory.find(h => h.new_status === item.status);
+                        const statusSince = statusSinceEntry ? new Date(statusSinceEntry.changed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
                         return `
                         <tr style="background: ${idx % 2 === 0 ? 'white' : '#f0fdf4'}">
                             <td style="${rowStyle}">
@@ -168,6 +172,7 @@ export default async function handler(req, res) {
                                 <div style="font-size: 12px; color: #374151; margin-top: 2px;">${item.title}</div>
                             </td>
                             <td style="${rowStyle} color: #374151;">${item.status || '—'}</td>
+                            <td style="${rowStyle} color: #374151; font-size: 12px;">${statusSince}</td>
                             <td style="${rowStyle} color: #374151; font-size: 12px;">
                                 ${item.latest_activity_label ? `<span style="color:#166534;font-weight:600;">${item.latest_activity_label}</span><br>` : ''}
                                 ${item.latest_activity_date ? `<span style="color:#9ca3af">${formatDate(item.latest_activity_date)}</span>` : '—'}
