@@ -273,7 +273,7 @@
 
             // ── UI state ──────────────────────────────────────────────────────────────
             const [expandedInfo, setExpandedInfo] = useState(new Set());
-            const [sortByActivity, setSortByActivity] = useState(false);
+            const [sortBy, setSortBy] = useState('default');
             const [activityFilter, setActivityFilter] = useState('all'); // 'all' | '7' | '30' | '90'
             const [statusHistory, setStatusHistory] = useState({}); // item_id -> [{old_status, new_status, changed_at, change_label}]
             const [expandedHistory, setExpandedHistory] = useState(new Set());
@@ -875,6 +875,21 @@
                     const { error } = await supabase.from('tracked_items').update({ action_status: newStatus }).eq('id', itemId);
                     if (error) throw error;
                     setItems(items.map(i => i.id === itemId ? { ...i, actionStatus: newStatus } : i));
+
+                    // Record in bill_status_history so it shows in reports' Recent Updates
+                    const labelMap = {
+                        action_needed: 'Action Needed',
+                        monitor_and_assess: 'Monitor & Assess',
+                        action_completed: 'Action Completed'
+                    };
+                    await supabase.from('bill_status_history').insert({
+                        item_id: itemId,
+                        old_status: labelMap[item.actionStatus] || item.actionStatus,
+                        new_status: labelMap[newStatus] || newStatus,
+                        change_label: `Tracker status changed: ${labelMap[item.actionStatus] || item.actionStatus} → ${labelMap[newStatus] || newStatus}`,
+                        changed_at: new Date().toISOString()
+                    });
+
                     await logActivity('action_status_changed', itemId, item.title, { from: item.actionStatus, to: newStatus });
                 } catch (err) { setError('Failed to update action status: ' + err.message); }
             };
@@ -1311,10 +1326,16 @@
                     matchesPriority && matchesActionStatus && matchesIntroducedBy &&
                     matchesHideTracked && matchesUpcomingHearing && matchesActivityFilter;
             }).sort((a, b) => {
-                if (!sortByActivity) return 0; // preserve default order
-                const dateA = a.latestActivityDate ? new Date(a.latestActivityDate) : new Date(a.date || 0);
-                const dateB = b.latestActivityDate ? new Date(b.latestActivityDate) : new Date(b.date || 0);
-                return dateB - dateA;
+                if (sortBy === 'activity') {
+                    const dateA = a.latestActivityDate ? new Date(a.latestActivityDate) : new Date(a.date || 0);
+                    const dateB = b.latestActivityDate ? new Date(b.latestActivityDate) : new Date(b.date || 0);
+                    return dateB - dateA;
+                }
+                if (sortBy === 'introduced_desc') return new Date(b.date || 0) - new Date(a.date || 0);
+                if (sortBy === 'introduced_asc') return new Date(a.date || 0) - new Date(b.date || 0);
+                if (sortBy === 'status') return (a.status || '').localeCompare(b.status || '');
+                if (sortBy === 'bill_number') return (a.billNumber || '').localeCompare(b.billNumber || '', undefined, { numeric: true });
+                return 0; // default: preserve fetch order
             });
 
             const categories = ['all', ...new Set(items.map(i => i.category).filter(Boolean))];
@@ -1538,12 +1559,14 @@
                                                 <option value="30">Active last 30 days</option>
                                                 <option value="90">Active last 90 days</option>
                                             </select>
-                                            <button
-                                                onClick={() => setSortByActivity(s => !s)}
-                                                className={`px-3 py-1 text-xs rounded font-medium border ${sortByActivity ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
-                                            >
-                                                {sortByActivity ? '🕐 Sorted by Latest Activity' : 'Sort by Latest Activity'}
-                                            </button>
+                                            <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="px-3 py-1 text-xs rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50">
+                                                <option value="default">Sort: Default</option>
+                                                <option value="introduced_desc">Sort: Newest First</option>
+                                                <option value="introduced_asc">Sort: Oldest First</option>
+                                                <option value="activity">Sort: Latest Activity</option>
+                                                <option value="status">Sort: Status A–Z</option>
+                                                <option value="bill_number">Sort: Bill Number</option>
+                                            </select>
                                         </div>
                                     </div>
                                     {loading && <div className="text-center py-12 text-gray-500">Loading legislation...</div>}
