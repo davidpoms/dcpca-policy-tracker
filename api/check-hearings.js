@@ -188,6 +188,11 @@ export default async function handler(req, res) {
             const oldStatus = item.status || null;
             const statusChanged = newStatus && oldStatus && newStatus !== oldStatus;
 
+            // Check for title change (e.g. "(CANCELLED)" appended by DC Council)
+            const newTitle = details.title || null;
+            const oldTitle = item.title || null;
+            const titleChanged = newTitle && oldTitle && newTitle.trim() !== oldTitle.trim();
+
             const activity = extractLatestActivityDate(details);
             const hearing = extractNextHearing(details);
             const reReferrals = details.committeeReReferral || [];
@@ -214,6 +219,22 @@ export default async function handler(req, res) {
                 results.statusChanges.push({ id: item.id, title: item.title, oldStatus, newStatus });
             }
 
+            // Record title change in history (e.g. cancellation notices)
+            if (titleChanged) {
+                await sbInsert('bill_status_history', {
+                    item_id: item.id,
+                    old_status: oldTitle,
+                    new_status: newTitle,
+                    change_label: `Title updated: "${oldTitle}" → "${newTitle}"`,
+                    changed_at: now.toISOString()
+                });
+                console.log(`[check-hearings] Title changed for ${item.bill_number}: "${oldTitle}" → "${newTitle}"`);
+
+                if (item.action_status === 'action_needed' || item.action_status === 'monitor_and_assess') {
+                    statusChangeAlerts.push({ item, oldStatus: oldTitle, newStatus: newTitle, activity, hearing, isTitleAlert: true });
+                }
+            }
+
             // Queue hearing alert if new hearing scheduled (regardless of action_status)
             if (hearingIsNew) {
                 // Record in status history so it shows in timeline and EOD report
@@ -235,6 +256,7 @@ export default async function handler(req, res) {
 
             // Update tracked_items
             await sbPatch('tracked_items', item.id, {
+                ...(titleChanged ? { title: newTitle } : {}),
                 status: newStatus || item.status,
                 next_hearing_date: hearing ? hearing.date.toISOString() : null,
                 hearing_type: hearing?.type || null,
@@ -269,7 +291,7 @@ export default async function handler(req, res) {
             <div style="background: #fef2f2; padding: 16px 24px; border: 1px solid #fca5a5; border-top: none; border-radius: 0 0 10px 10px; margin-bottom: 16px;">
                 <p style="margin: 0; font-size: 13px; color: #7f1d1d;">${statusChangeAlerts.length} tracked bill${statusChangeAlerts.length > 1 ? 's have' : ' has'} a new LIMS status update.</p>
             </div>
-            ${statusChangeAlerts.map(({ item, oldStatus, newStatus, activity, hearing, isHearingAlert }) => `
+            ${statusChangeAlerts.map(({ item, oldStatus, newStatus, activity, hearing, isHearingAlert, isTitleAlert }) => `
             <div style="${itemStyle}">
                 <div style="font-size: 14px; font-weight: 600; color: #111827; margin-bottom: 8px;">
                     ${item.link ? `<a href="${item.link}" style="color: #4f46e5; text-decoration: none;">${item.title}</a>` : item.title}
@@ -285,6 +307,17 @@ export default async function handler(req, res) {
                     <tr>
                         <td style="padding: 4px 8px 4px 0; color: #d97706; font-weight: 600;">📅 New Hearing</td>
                         <td colspan="3" style="padding: 4px 0; color: #d97706; font-weight: 600;">${hearing.type || 'Public Hearing'} — ${formatDate(hearing.date.toISOString())}${hearing.location ? ' · ' + hearing.location : ''}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 2px 8px 2px 0; color: #6b7280;">Status</td>
+                        <td colspan="3" style="padding: 2px 0; color: #374151;">${item.status || '—'}</td>
+                    </tr>` : isTitleAlert ? `
+                    <tr>
+                        <td style="padding: 4px 8px 4px 0; color: #7c3aed; font-weight: 600; white-space: nowrap; vertical-align: top;">✏️ Title Changed</td>
+                        <td colspan="3" style="padding: 4px 0;">
+                            <span style="color: #6b7280; text-decoration: line-through; font-size: 11px;">${oldStatus}</span><br>
+                            <span style="color: #7c3aed; font-weight: 600;">${newStatus}</span>
+                        </td>
                     </tr>
                     <tr>
                         <td style="padding: 2px 8px 2px 0; color: #6b7280;">Status</td>
