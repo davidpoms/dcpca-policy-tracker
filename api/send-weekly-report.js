@@ -166,8 +166,8 @@ export default async function handler(req, res) {
                 const statusSinceEntry = allHistory.find(h => h.new_status === item.status);
                 const statusSince = statusSinceEntry
                     ? new Date(statusSinceEntry.changed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                    : item.latest_activity_date
-                        ? new Date(item.latest_activity_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + '*'
+                    : item.tracked_at
+                        ? new Date(item.tracked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + '*'
                         : '—';
                         return `
                         <tr style="background: ${idx % 2 === 0 ? 'white' : '#f0fdf4'}">
