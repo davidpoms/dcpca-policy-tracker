@@ -86,7 +86,11 @@ export default async function handler(req, res) {
         historyMap[h.item_id].push(h);
     });
 
-    const actionNeeded = items.filter(i => i.action_status === 'action_needed');
+    // Changes since yesterday's 8:30am run
+    const sinceLastRun = new Date(now);
+    sinceLastRun.setDate(sinceLastRun.getDate() - 1);
+    sinceLastRun.setHours(13, 30, 0, 0); // 8:30am ET = 13:30 UTC
+    const changesSinceLastRun = statusHistory.filter(h => new Date(h.changed_at) >= sinceLastRun).length;
     const monitorAndAssess = items.filter(i => i.action_status === 'monitor_and_assess');
     const completed = items.filter(i => i.action_status === 'action_completed');
     const withHearings = items
@@ -164,7 +168,29 @@ export default async function handler(req, res) {
             </table>
         </div>
 
-        ${recentlyUpdated.length > 0 ? `
+        ${changesSinceLastRun > 0 ? (() => {
+            const recentChanges = statusHistory.filter(h => new Date(h.changed_at) >= sinceLastRun);
+            const recentItemIds = [...new Set(recentChanges.map(h => h.item_id))];
+            const recentChangeItems = recentItemIds.map(id => items.find(i => i.id === id)).filter(Boolean);
+            return `
+        <div style="margin-bottom: 24px; padding: 16px; background: #fefce8; border: 1px solid #fde047; border-radius: 8px;">
+            <h2 style="margin: 0 0 12px; font-size: 14px; font-weight: 700; color: #854d0e;">⚡ ${changesSinceLastRun} change${changesSinceLastRun !== 1 ? 's' : ''} since yesterday</h2>
+            <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+                ${recentChangeItems.map(item => {
+                    const changes = recentChanges.filter(h => h.item_id === item.id);
+                    return `<tr style="border-bottom: 1px solid #fde047;">
+                        <td style="padding: 6px 8px 6px 0; color: #4f46e5; font-weight: 500; white-space: nowrap;">
+                            ${item.link ? `<a href="${item.link}" style="color: #4f46e5; text-decoration: none;">${item.bill_number || item.id}</a>` : (item.bill_number || item.id)}
+                        </td>
+                        <td style="padding: 6px 8px; color: #374151; font-size: 11px;">${item.title}</td>
+                        <td style="padding: 6px 0; color: #854d0e; font-size: 11px; white-space: nowrap;">
+                            ${changes.map(h => h.change_label || `${h.old_status} → ${h.new_status}`).join('<br>')}
+                        </td>
+                    </tr>`;
+                }).join('')}
+            </table>
+        </div>`;
+        })() : ''}
         <div style="${sectionStyle} background: #f0fdf4; border: 1px solid #86efac;">
             <h2 style="margin: 0 0 12px; font-size: 15px; color: #166534;">🆕 Recent Updates — Last 7 Days (${recentlyUpdated.length})</h2>
             ${recentlyUpdated.map(item => {
@@ -245,7 +271,7 @@ export default async function handler(req, res) {
     await transporter.sendMail({
         from: `DC Policy Tracker <${GMAIL_USER}>`,
         to: DAILY_REPORT_TO,
-        subject: `DC Policy Tracker · ${actionNeeded.length} action needed · ${withHearings.length} upcoming hearings · ${recentlyUpdated.length} recent updates · ${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+        subject: `DC Policy Tracker ${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${changesSinceLastRun} change${changesSinceLastRun !== 1 ? 's' : ''} since yesterday · ${actionNeeded.length} action needed · ${withHearings.length} upcoming hearings`,
         html
     });
 
