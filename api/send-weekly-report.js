@@ -223,6 +223,7 @@ export default async function handler(req, res) {
                             <td style="${rowStyle}">
                                 ${item.link ? `<a href="${item.link}" style="color: #4f46e5; font-weight: 500; text-decoration: none;">${item.bill_number || item.id}</a>` : (item.bill_number || item.id)}
                                 <div style="font-size: 12px; color: #374151; margin-top: 2px;">${item.title}</div>
+                                ${item.manual_summary ? `<div style="font-size: 11px; color: #6b7280; margin-top: 4px; font-style: italic;">${item.manual_summary.substring(0, 200)}${item.manual_summary.length > 200 ? '…' : ''}</div>` : ''}
                             </td>
                             <td style="${rowStyle} color: #374151;">${item.status || '—'}</td>
                             <td style="${rowStyle} color: #374151; font-size: 12px;">${statusSince}</td>
