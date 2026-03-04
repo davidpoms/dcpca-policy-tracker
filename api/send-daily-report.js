@@ -255,6 +255,7 @@ export default async function handler(req, res) {
                         ${item.latest_activity_label && item.latest_activity_date ? `<tr><td style="padding: 2px 8px 2px 0; color: #16a34a; font-weight: 600;">Latest</td><td colspan="3" style="padding: 2px 0; color: #16a34a; font-weight: 600;">${item.latest_activity_label} — ${formatDate(item.latest_activity_date)}</td></tr>` : ''}
                         ${recentHistory.length > 0 ? `<tr><td style="padding: 4px 8px 2px 0; color: #6b7280; vertical-align: top;">Changes</td><td colspan="3" style="padding: 4px 0; color: #374151; font-size: 11px;">${recentHistory.map(h => formatChangeLabel(h)).join('<br>')}</td></tr>` : ''}
                         ${note ? `<tr><td style="padding: 4px 8px 2px 0; color: #6b7280; vertical-align: top;">Note</td><td colspan="3" style="padding: 4px 0; color: #374151; font-style: italic;">${note}</td></tr>` : ''}
+                        ${item.manual_summary ? `<tr><td style="padding: 4px 8px 2px 0; color: #6b7280; vertical-align: top;">Summary</td><td colspan="3" style="padding: 4px 0; color: #374151; font-size: 11px;">${item.manual_summary.substring(0, 400)}${item.manual_summary.length > 400 ? '…' : ''}</td></tr>` : ''}
                     </table>
                 </div>`;
             }).join('')}
