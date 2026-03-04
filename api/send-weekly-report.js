@@ -75,6 +75,7 @@ export default async function handler(req, res) {
             <table style="width:100%;font-size:12px;border-collapse:collapse;">${rows}</table>
         </div>`;
     })() : '';
+    const actionNeeded = items.filter(i => i.action_status === 'action_needed');
     const monitorAndAssess = items.filter(i => i.action_status === 'monitor_and_assess');
     const withHearings = items
         .filter(i => i.next_hearing_date && new Date(i.next_hearing_date) >= todayStart)
