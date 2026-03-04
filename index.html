@@ -320,7 +320,8 @@
                             latestActivityDate: item.latest_activity_date || item.date || null,
                             latestActivityLabel: item.latest_activity_label || null,
                             activityCount: item.activity_count || 0,
-                            deadline: item.deadline || null
+                            deadline: item.deadline || null,
+                            trackedAt: item.tracked_at || null
                         }));
                         setItems(displayItems);
 
@@ -1331,7 +1332,8 @@
                     const dateB = b.latestActivityDate ? new Date(b.latestActivityDate) : new Date(b.date || 0);
                     return dateB - dateA;
                 }
-                if (sortBy === 'introduced_desc') return new Date(b.date || 0) - new Date(a.date || 0);
+                if (sortBy === 'tracked_desc') return new Date(b.trackedAt || 0) - new Date(a.trackedAt || 0);
+                if (sortBy === 'tracked_asc') return new Date(a.trackedAt || 0) - new Date(b.trackedAt || 0);
                 if (sortBy === 'introduced_asc') return new Date(a.date || 0) - new Date(b.date || 0);
                 if (sortBy === 'status') return (a.status || '').localeCompare(b.status || '');
                 if (sortBy === 'bill_number') return (a.billNumber || '').localeCompare(b.billNumber || '', undefined, { numeric: true });
@@ -1561,9 +1563,11 @@
                                             </select>
                                             <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="px-3 py-1 text-xs rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50">
                                                 <option value="default">Sort: Default</option>
-                                                <option value="introduced_desc">Sort: Newest First</option>
-                                                <option value="introduced_asc">Sort: Oldest First</option>
+                                                <option value="introduced_desc">Sort: Intro Date (Newest)</option>
+                                                <option value="introduced_asc">Sort: Intro Date (Oldest)</option>
                                                 <option value="activity">Sort: Latest Activity</option>
+                                                <option value="tracked_desc">Sort: Recently Tracked</option>
+                                                <option value="tracked_asc">Sort: First Tracked</option>
                                                 <option value="status">Sort: Status A–Z</option>
                                                 <option value="bill_number">Sort: Bill Number</option>
                                             </select>
