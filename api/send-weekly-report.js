@@ -162,9 +162,13 @@ export default async function handler(req, res) {
                 <tbody>
                     ${recentlyUpdated.map((item, idx) => {
                         const recentChanges = (historyMap[item.id] || []).filter(h => new Date(h.changed_at) >= thirtyDaysAgo);
-                        const allHistory = (historyMap[item.id] || []).slice().sort((a, b) => new Date(a.changed_at) - new Date(b.changed_at));
-                        const statusSinceEntry = allHistory.find(h => h.new_status === item.status);
-                        const statusSince = statusSinceEntry ? new Date(statusSinceEntry.changed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+                const allHistory = (historyMap[item.id] || []).slice().sort((a, b) => new Date(a.changed_at) - new Date(b.changed_at));
+                const statusSinceEntry = allHistory.find(h => h.new_status === item.status);
+                const statusSince = statusSinceEntry
+                    ? new Date(statusSinceEntry.changed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                    : item.latest_activity_date
+                        ? new Date(item.latest_activity_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + '*'
+                        : '—';
                         return `
                         <tr style="background: ${idx % 2 === 0 ? 'white' : '#f0fdf4'}">
                             <td style="${rowStyle}">
