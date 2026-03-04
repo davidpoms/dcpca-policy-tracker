@@ -172,7 +172,14 @@ export default async function handler(req, res) {
                 // Find when the current status was first recorded in history
                 const allHistory = (historyMap[item.id] || []).slice().sort((a, b) => new Date(a.changed_at) - new Date(b.changed_at));
                 const statusSinceEntry = allHistory.find(h => h.new_status === item.status);
-                const statusSince = statusSinceEntry ? new Date(statusSinceEntry.changed_at) : null;
+                const statusSince = statusSinceEntry
+                    ? new Date(statusSinceEntry.changed_at)
+                    : item.latest_activity_date
+                        ? new Date(item.latest_activity_date)
+                        : null;
+                const statusSinceLabel = statusSince
+                    ? statusSince.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + (statusSinceEntry ? '' : '*')
+                    : '—';
                 const note = notesMap[item.id];
                 return `
                 <div style="${itemStyle}">
@@ -190,7 +197,7 @@ export default async function handler(req, res) {
                             <td style="padding: 2px 8px 2px 0; color: #6b7280;">Status</td>
                             <td style="padding: 2px 0; color: #374151;">${item.status || '—'}</td>
                             <td style="padding: 2px 8px 2px 16px; color: #6b7280;">Since</td>
-                            <td style="padding: 2px 0; color: #374151;">${statusSince ? statusSince.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
+                            <td style="padding: 2px 0; color: #374151;">${statusSinceLabel}</td>
                         </tr>
                         ${item.latest_activity_label && item.latest_activity_date ? `<tr><td style="padding: 2px 8px 2px 0; color: #16a34a; font-weight: 600;">Latest</td><td colspan="3" style="padding: 2px 0; color: #16a34a; font-weight: 600;">${item.latest_activity_label} — ${formatDate(item.latest_activity_date)}</td></tr>` : ''}
                         ${item.is_manual_entry ? `<tr><td style="padding: 2px 8px 2px 0; color: #7c3aed; font-weight: 600;">Source</td><td colspan="3" style="padding: 2px 0; color: #7c3aed;">DC Register / Manual Entry</td></tr>` : ''}
