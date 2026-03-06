@@ -283,6 +283,7 @@
             const [filters, setFilters] = useState({
                 keywords: '',
                 committee: 'all',
+                agency: 'all',
                 category: 'all',
                 assignedTo: 'all',
                 priority: 'all',
@@ -296,6 +297,9 @@
             const [trackedKeywords, setTrackedKeywords] = useState([]);
             const [trackedCommittees, setTrackedCommittees] = useState([]);
             const [trackedSponsors, setTrackedSponsors] = useState([]);
+            const [trackedAgencies, setTrackedAgencies] = useState([]);
+            const [showAddAgency, setShowAddAgency] = useState(false);
+            const [newAgencyInput, setNewAgencyInput] = useState('');
             const [searchMode, setSearchMode] = useState('all');
             const [teamMembers, setTeamMembers] = useState([]);
             const [searchOffset, setSearchOffset] = useState(0);
@@ -432,6 +436,10 @@
                         .from('tracked_sponsors').select('*').order('added_at', { ascending: true });
                     if (sponsorsError) throw sponsorsError;
                     if (sponsorsData) setTrackedSponsors(sponsorsData.map(s => s.sponsor_name));
+
+                    const { data: agenciesData } = await supabase
+                        .from('tracked_agencies').select('*').order('agency_name', { ascending: true });
+                    if (agenciesData) setTrackedAgencies(agenciesData.map(a => a.agency_name));
 
                     const { data: membersData, error: membersError } = await supabase
                         .from('team_members').select('*').eq('active', true).order('name', { ascending: true });
@@ -1087,6 +1095,24 @@
                 } catch (err) { setError('Failed to remove sponsor: ' + err.message); }
             };
 
+            const addAgency = async (name) => {
+                const trimmed = name.trim();
+                if (!trimmed || trackedAgencies.includes(trimmed)) return;
+                try {
+                    const { error } = await supabase.from('tracked_agencies').insert({ agency_name: trimmed });
+                    if (error) throw error;
+                    setTrackedAgencies([...trackedAgencies, trimmed].sort());
+                } catch (err) { setError('Failed to add agency: ' + err.message); }
+            };
+
+            const removeAgency = async (name) => {
+                try {
+                    const { error } = await supabase.from('tracked_agencies').delete().eq('agency_name', name);
+                    if (error) throw error;
+                    setTrackedAgencies(trackedAgencies.filter(a => a !== name));
+                } catch (err) { setError('Failed to remove agency: ' + err.message); }
+            };
+
             const addManualEntry = async () => {
                 if (!manualEntry.title.trim()) { alert('Please enter a title'); return; }
                 const blankManual = { title: '', agency: '', status: 'Published', date: new Date().toISOString().split('T')[0], link: '', assignedTo: 'Unassigned', priority: 'medium', actionStatus: 'action_needed', noticeId: '', registerIssue: '', registerNotes: '', deadline: '' };
@@ -1362,6 +1388,7 @@
                     item.description.toLowerCase().includes(filters.keywords.toLowerCase());
                 const matchesCommittee = filters.committee === 'all' ||
                     (item.committees && item.committees.some(c => c === filters.committee));
+                const matchesAgency = filters.agency === 'all' || item.agency === filters.agency;
                 const matchesCategory = filters.category === 'all' || item.category === filters.category;
                 const matchesAssignedTo = filters.assignedTo === 'all' || item.assignedTo === filters.assignedTo;
                 const matchesPriority = filters.priority === 'all' || item.priority === filters.priority;
@@ -1388,7 +1415,7 @@
                     const addedDate = item.isManualEntry && item.trackedAt ? new Date(item.trackedAt) : null;
                     return (actDate && actDate >= cutoff) || (addedDate && addedDate >= cutoff);
                 })();
-                return matchesKeyword && matchesCommittee && matchesCategory && matchesAssignedTo &&
+                return matchesKeyword && matchesCommittee && matchesAgency && matchesCategory && matchesAssignedTo &&
                     matchesPriority && matchesActionStatus && matchesIntroducedBy &&
                     matchesHideTracked && matchesUpcomingHearing && matchesActivityFilter;
             }).sort((a, b) => {
@@ -1407,6 +1434,7 @@
 
             const categories = ['all', ...new Set(items.map(i => i.category).filter(Boolean))];
             const committees = ['all', ...new Set(items.filter(i => i.committees && i.committees.length > 0).flatMap(i => i.committees).filter(Boolean))];
+            const agencies = ['all', ...new Set(items.filter(i => i.agency).map(i => i.agency).filter(Boolean)).values()].sort((a, b) => a === 'all' ? -1 : a.localeCompare(b));
             const assignees = ['all', ...new Set(items.map(i => i.assignedTo).filter(Boolean))];
             const priorities = ['all', 'high', 'medium', 'low'];
             const actionStatuses = ['all', 'action_needed', 'action_completed', 'monitor_and_assess'];
@@ -1586,6 +1614,12 @@
                                                 </select>
                                             </div>
                                         ))}
+                                        <div>
+                                            <label className="block text-sm font-medium mb-2">Agency</label>
+                                            <select value={filters.agency} onChange={e => setFilters({...filters, agency: e.target.value})} className="w-full px-3 py-2 border rounded-lg">
+                                                {agencies.map(a => <option key={a} value={a}>{a === 'all' ? 'All Agencies' : a}</option>)}
+                                            </select>
+                                        </div>
                                         <div>
                                             <label className="block text-sm font-medium mb-2">Action Status</label>
                                             <select value={filters.actionStatus} onChange={e => setFilters({...filters, actionStatus: e.target.value})} className="w-full px-3 py-2 border rounded-lg">
@@ -1800,7 +1834,13 @@
                                                                 </div>
                                                             )}
 
-                                                            {item.committees && item.committees.length > 0 && (
+                                                            {item.isManualEntry && item.agency && (
+                                                                <div className="mb-2">
+                                                                    <div className="text-xs font-semibold mb-1">Agency:</div>
+                                                                    <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded">{item.agency}</span>
+                                                                </div>
+                                                            )}
+                                                            {!item.isManualEntry && item.committees && item.committees.length > 0 && (
                                                                 <div className="mb-2">
                                                                     <div className="text-xs font-semibold mb-1">Committees:</div>
                                                                     <div className="flex flex-wrap gap-1">
@@ -2074,7 +2114,57 @@
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-1">Agency</label>
-                                        <input type="text" value={manualEntry.agency} onChange={e => setManualEntry({...manualEntry, agency: e.target.value})} placeholder="e.g., Department of Health" className="w-full px-3 py-2 border rounded-lg" />
+                                        <div className="flex gap-2">
+                                            <select
+                                                value={trackedAgencies.includes(manualEntry.agency) ? manualEntry.agency : (manualEntry.agency ? '__custom__' : '')}
+                                                onChange={e => {
+                                                    if (e.target.value === '__add__') {
+                                                        setShowAddAgency(true);
+                                                    } else if (e.target.value !== '__custom__') {
+                                                        setManualEntry({...manualEntry, agency: e.target.value});
+                                                    }
+                                                }}
+                                                className="flex-1 px-3 py-2 border rounded-lg"
+                                            >
+                                                <option value="">Select an agency...</option>
+                                                {trackedAgencies.map(a => <option key={a} value={a}>{a}</option>)}
+                                                {manualEntry.agency && !trackedAgencies.includes(manualEntry.agency) && (
+                                                    <option value="__custom__">{manualEntry.agency}</option>
+                                                )}
+                                                <option value="__add__">+ Add new agency to list...</option>
+                                            </select>
+                                        </div>
+                                        {showAddAgency && (
+                                            <div className="mt-2 flex gap-2">
+                                                <input
+                                                    type="text"
+                                                    value={newAgencyInput}
+                                                    onChange={e => setNewAgencyInput(e.target.value)}
+                                                    placeholder="Full agency name"
+                                                    className="flex-1 px-3 py-2 border rounded-lg text-sm"
+                                                    autoFocus
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter') {
+                                                            addAgency(newAgencyInput).then(() => {
+                                                                setManualEntry({...manualEntry, agency: newAgencyInput.trim()});
+                                                                setNewAgencyInput('');
+                                                                setShowAddAgency(false);
+                                                            });
+                                                        }
+                                                        if (e.key === 'Escape') { setShowAddAgency(false); setNewAgencyInput(''); }
+                                                    }}
+                                                />
+                                                <button
+                                                    onClick={() => addAgency(newAgencyInput).then(() => {
+                                                        setManualEntry({...manualEntry, agency: newAgencyInput.trim()});
+                                                        setNewAgencyInput('');
+                                                        setShowAddAgency(false);
+                                                    })}
+                                                    className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
+                                                >Save</button>
+                                                <button onClick={() => { setShowAddAgency(false); setNewAgencyInput(''); }} className="px-3 py-2 bg-gray-200 rounded-lg text-sm hover:bg-gray-300">Cancel</button>
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
