@@ -176,11 +176,11 @@ export default async function handler(req, res) {
 
         <div style="display: flex; gap: 12px; margin-bottom: 24px;">
             ${[
+                ['Updates This Week', changesSinceLastRun, '#854d0e', '#fffbeb'],
+                ['Upcoming Hearings', withHearings.length, '#d97706', '#fffbeb'],
+                ['Updates Last 30 Days', recentlyUpdated.length, '#16a34a', '#f0fdf4'],
                 ['Action Needed', actionNeeded.length, '#dc2626', '#fef2f2'],
                 ['Monitor & Assess', monitorAndAssess.length, '#2563eb', '#eff6ff'],
-                ['Upcoming Hearings', withHearings.length, '#d97706', '#fffbeb'],
-                ['Recent Updates', recentlyUpdated.length, '#16a34a', '#f0fdf4'],
-                ['Total Tracked', items.length, '#374151', '#f3f4f6']
             ].map(([label, count, color, bg]) => `
             <div style="flex: 1; padding: 16px; background: ${bg}; border-radius: 8px; text-align: center;">
                 <div style="font-size: 28px; font-weight: 700; color: ${color};">${count}</div>
