@@ -166,8 +166,8 @@ export default async function handler(req, res) {
                 <tr>
                     <td style="padding: 2px 8px 2px 0; color: #6b7280;">Status</td>
                     <td style="padding: 2px 0; color: #374151;">${item.status || '—'}</td>
-                    <td style="padding: 2px 8px 2px 16px; color: #6b7280;">Committee</td>
-                    <td style="padding: 2px 0; color: #374151;">${item.committees && item.committees.length > 0 ? (Array.isArray(item.committees) ? item.committees.join(', ') : item.committees) : '—'}</td>
+                    <td style="padding: 2px 8px 2px 16px; color: #6b7280;">${item.is_manual_entry ? 'Agency' : 'Committee'}</td>
+                    <td style="padding: 2px 0; color: #374151;">${item.is_manual_entry ? (item.agency || '—') : (item.committees && item.committees.length > 0 ? (Array.isArray(item.committees) ? item.committees.join(', ') : item.committees) : '—')}</td>
                 </tr>
                 ${item.introduced_by ? `<tr><td style="padding: 2px 8px 2px 0; color: #6b7280;">Sponsor</td><td colspan="3" style="padding: 2px 0; color: #374151;">${item.introduced_by}</td></tr>` : ''}
                 ${item.latest_activity_date && item.latest_activity_label ? `<tr><td style="padding: 2px 8px 2px 0; color: #6b7280; white-space: nowrap;">Last Activity</td><td colspan="3" style="padding: 2px 0; color: #374151;">${item.latest_activity_label} &mdash; ${formatDate(item.latest_activity_date)}</td></tr>` : ''}
