@@ -1584,11 +1584,7 @@
                                         <h2 className="text-xl font-semibold">Tracked Sponsors</h2>
                                         <button onClick={() => setShowAddSponsor(true)} className="text-indigo-600 hover:text-indigo-800">+ Add</button>
                                     </div>
-                                    <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded text-xs">
-                                        <strong>Note:</strong> Sponsor tracking is for reference only. To find bills by sponsor, use{' '}
-                                        <a href="https://lims.dccouncil.gov/voteSearch" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">lims.dccouncil.gov/voteSearch</a>
-                                        {' '}then check the bills here to track them.
-                                    </div>
+
                                     <div className="space-y-2">
                                         {trackedSponsors.map(sponsor => (
                                             <div key={sponsor} className="flex items-center justify-between p-2 bg-purple-50 rounded">
