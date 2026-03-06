@@ -137,7 +137,7 @@ export default async function handler(req, res) {
                     <th style="${thStyle}">Bill / Title</th>
                     <th style="${thStyle}">Status</th>
                     <th style="${thStyle}">Last Activity</th>
-                    <th style="${thStyle}">Committee</th>
+                    <th style="${thStyle}">Committee / Agency</th>
                     ${showHearing ? `<th style="${thStyle}">Hearing</th>` : ''}
                 </tr>
             </thead>
@@ -155,7 +155,7 @@ export default async function handler(req, res) {
                         </td>
                         <td style="${rowStyle} color: #374151;">${item.status || '—'}</td>
                         <td style="${rowStyle} color: #374151; font-size: 12px;">${activityStr}</td>
-                        <td style="${rowStyle} color: #374151;">${item.committees && item.committees.length > 0 ? (Array.isArray(item.committees) ? item.committees.join(', ') : item.committees) : '—'}</td>
+                        <td style="${rowStyle} color: #374151;">${item.is_manual_entry ? (item.agency || '—') : (item.committees && item.committees.length > 0 ? (Array.isArray(item.committees) ? item.committees.join(', ') : item.committees) : '—')}</td>
                         ${showHearing ? `<td style="${rowStyle} ${hearing ? 'color: #d97706; font-weight: 600;' : 'color: #9ca3af;'}">${hearing ? `📅 ${formatDate(item.next_hearing_date)}` : '—'}</td>` : ''}
                     </tr>`;
                 }).join('')}
