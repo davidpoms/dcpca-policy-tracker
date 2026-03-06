@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS bill_status_history (
   changed_at   timestamptz DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_bill_status_history_item_id   ON bill_status_history(item_id);
+CREATE INDEX IF NOT EXISTS idx_bill_status_history_item_id    ON bill_status_history(item_id);
 CREATE INDEX IF NOT EXISTS idx_bill_status_history_changed_at ON bill_status_history(changed_at DESC);
 
 -- ─── Team members ─────────────────────────────────────────────────────────────
@@ -99,6 +99,12 @@ CREATE TABLE IF NOT EXISTS tracked_sponsors (
   id           uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   sponsor_name text NOT NULL UNIQUE,
   added_at     timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS tracked_agencies (
+  id          uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  agency_name text NOT NULL UNIQUE,
+  added_at    timestamptz DEFAULT now()
 );
 
 -- Prevents duplicate keyword alerts for the same bill+keyword combination
@@ -144,3 +150,13 @@ CREATE TABLE IF NOT EXISTS lims_cache_cursor (
   started_at        timestamptz,
   updated_at        timestamptz DEFAULT now()
 );
+
+-- ─── Default agency list ──────────────────────────────────────────────────────
+
+INSERT INTO tracked_agencies (agency_name) VALUES
+  ('Department of Health Care Finance'),
+  ('DC Health Department'),
+  ('Department of Behavioral Health'),
+  ('Department of Insurance, Securities, and Banking'),
+  ('Deputy Mayor for Health and Human Services')
+ON CONFLICT (agency_name) DO NOTHING;
