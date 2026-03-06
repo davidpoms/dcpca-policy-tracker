@@ -214,6 +214,71 @@
         }
 
         function DCPolicyTracker() {
+            // ─── Password gate ────────────────────────────────────────────────────────────
+            const [authenticated, setAuthenticated] = useState(() => {
+                try {
+                    const stored = sessionStorage.getItem('dc_tracker_session');
+                    if (!stored) return false;
+                    const { token, expires } = JSON.parse(stored);
+                    return token && expires && Date.now() < expires;
+                } catch { return false; }
+            });
+            const [passwordInput, setPasswordInput] = useState('');
+            const [passwordError, setPasswordError] = useState('');
+            const [passwordLoading, setPasswordLoading] = useState(false);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setPasswordLoading(true);
+                setPasswordError('');
+                try {
+                    const res = await fetch('/api/check-password', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ password: passwordInput })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) { setPasswordError('Incorrect password. Please try again.'); return; }
+                    sessionStorage.setItem('dc_tracker_session', JSON.stringify({ token: data.token, expires: data.expires }));
+                    setAuthenticated(true);
+                } catch {
+                    setPasswordError('Could not reach the server. Please try again.');
+                } finally {
+                    setPasswordLoading(false);
+                }
+            };
+
+            if (!authenticated) return (
+                <div style={{ minHeight: '100vh', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+                    <div style={{ background: 'white', borderRadius: 12, padding: '40px 48px', width: 360, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }}>
+                        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+                            <div style={{ fontSize: 32, marginBottom: 8 }}>🏛️</div>
+                            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#111827' }}>DC Policy Tracker</h1>
+                            <p style={{ margin: '6px 0 0', fontSize: 13, color: '#6b7280' }}>Enter your access password to continue</p>
+                        </div>
+                        <form onSubmit={handleLogin}>
+                            <input
+                                type="password"
+                                value={passwordInput}
+                                onChange={e => setPasswordInput(e.target.value)}
+                                placeholder="Password"
+                                autoFocus
+                                style={{ width: '100%', padding: '10px 12px', fontSize: 14, border: '1px solid #d1d5db', borderRadius: 6, outline: 'none', boxSizing: 'border-box', marginBottom: 12 }}
+                            />
+                            {passwordError && <p style={{ margin: '0 0 12px', fontSize: 13, color: '#dc2626' }}>{passwordError}</p>}
+                            <button
+                                type="submit"
+                                disabled={passwordLoading || !passwordInput}
+                                style={{ width: '100%', padding: '10px', background: passwordLoading || !passwordInput ? '#a5b4fc' : '#4f46e5', color: 'white', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 600, cursor: passwordLoading || !passwordInput ? 'default' : 'pointer' }}
+                            >
+                                {passwordLoading ? 'Checking…' : 'Sign In'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+
+            // ─── App state ────────────────────────────────────────────────────────────────
             const [items, setItems] = useState([]);
             const [filters, setFilters] = useState({
                 keywords: '',
