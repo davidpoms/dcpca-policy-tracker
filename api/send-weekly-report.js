@@ -204,6 +204,7 @@ export default async function handler(req, res) {
                     <tr>
                         <th style="${thStyle}">Bill / Title</th>
                         <th style="${thStyle}">Status</th>
+                        <th style="${thStyle}">Committee / Agency</th>
                         <th style="${thStyle}">Status Since</th>
                         <th style="${thStyle}">Latest Activity</th>
                     </tr>
@@ -226,6 +227,7 @@ export default async function handler(req, res) {
                                 ${item.manual_summary ? `<div style="font-size: 11px; color: #6b7280; margin-top: 4px; font-style: italic;">${item.manual_summary.substring(0, 200)}${item.manual_summary.length > 200 ? '…' : ''}</div>` : ''}
                             </td>
                             <td style="${rowStyle} color: #374151;">${item.status || '—'}</td>
+                            <td style="${rowStyle} color: #374151; font-size: 12px;">${item.is_manual_entry ? (item.agency || '—') : (item.committees && item.committees.length > 0 ? (Array.isArray(item.committees) ? item.committees.join(', ') : item.committees) : '—')}</td>
                             <td style="${rowStyle} color: #374151; font-size: 12px;">${statusSince}</td>
                             <td style="${rowStyle} color: #374151; font-size: 12px;">
                                 ${item.latest_activity_label ? `<span style="color:#166534;font-weight:600;">${item.latest_activity_label}</span><br>` : ''}
