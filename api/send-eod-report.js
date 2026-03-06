@@ -121,6 +121,18 @@ export default async function handler(req, res) {
         (historyByItem[item.id] || []).some(h => h.change_label && h.change_label.startsWith('Hearing Scheduled'))
     );
 
+    const allItems = await supabaseGet('/tracked_items?select=action_status,next_hearing_date,latest_activity_date,tracked_at,is_manual_entry');
+    const actionNeeded = allItems.filter(i => i.action_status === 'action_needed');
+    const monitorAndAssess = allItems.filter(i => i.action_status === 'monitor_and_assess');
+    const withHearings = allItems.filter(i => i.next_hearing_date && new Date(i.next_hearing_date) >= todayStartDate);
+    const sevenDaysAgo = new Date(now); sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const recentlyUpdated = allItems.filter(i => {
+        const actDate = i.latest_activity_date ? new Date(i.latest_activity_date) : null;
+        const addedDate = i.is_manual_entry && i.tracked_at ? new Date(i.tracked_at) : null;
+        return (actDate && actDate >= sevenDaysAgo) || (addedDate && addedDate >= sevenDaysAgo);
+    });
+    const updatesToday = changedItems.length + newlyTracked.length;
+
     const itemStyleNew = 'margin: 12px 0; padding: 12px; border-radius: 6px; background: white; border: 1px solid #a5b4fc;';
     const renderNewItem = (item) => {
         const note = notesMap[item.id];
@@ -166,16 +178,24 @@ export default async function handler(req, res) {
         <table style="width: 100%; text-align: center; border-collapse: collapse;">
             <tr>
                 <td style="padding: 8px; border-right: 1px solid #e5e7eb;">
-                    <div style="font-size: 28px; font-weight: 700; color: #dc2626;">${statusChanges.length}</div>
-                    <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Status Changes</div>
+                    <div style="font-size: 28px; font-weight: 700; color: #854d0e;">${updatesToday}</div>
+                    <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Updates Since Yesterday</div>
                 </td>
                 <td style="padding: 8px; border-right: 1px solid #e5e7eb;">
-                    <div style="font-size: 28px; font-weight: 700; color: #d97706;">${hearingChanges.length}</div>
-                    <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">New Hearings</div>
+                    <div style="font-size: 28px; font-weight: 700; color: #d97706;">${withHearings.length}</div>
+                    <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Upcoming Hearings</div>
+                </td>
+                <td style="padding: 8px; border-right: 1px solid #e5e7eb;">
+                    <div style="font-size: 28px; font-weight: 700; color: #16a34a;">${recentlyUpdated.length}</div>
+                    <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Updates Last 7 Days</div>
+                </td>
+                <td style="padding: 8px; border-right: 1px solid #e5e7eb;">
+                    <div style="font-size: 28px; font-weight: 700; color: #dc2626;">${actionNeeded.length}</div>
+                    <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Action Needed</div>
                 </td>
                 <td style="padding: 8px;">
-                    <div style="font-size: 28px; font-weight: 700; color: #4f46e5;">${newlyTracked.length}</div>
-                    <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Newly Tracked</div>
+                    <div style="font-size: 28px; font-weight: 700; color: #2563eb;">${monitorAndAssess.length}</div>
+                    <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Monitor & Assess</div>
                 </td>
             </tr>
         </table>
