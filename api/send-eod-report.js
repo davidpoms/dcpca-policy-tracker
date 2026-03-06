@@ -93,6 +93,10 @@ export default async function handler(req, res) {
                     <td style="padding: 2px 8px 2px 16px; color: #6b7280;">Status</td>
                     <td style="padding: 2px 0; color: #374151;">${item.status || '—'}</td>
                 </tr>
+                <tr>
+                    <td style="padding: 2px 8px 2px 0; color: #6b7280;">${item.is_manual_entry ? 'Agency' : 'Committee'}</td>
+                    <td colspan="3" style="padding: 2px 0; color: #374151;">${item.is_manual_entry ? (item.agency || '—') : (item.committees && item.committees.length > 0 ? (Array.isArray(item.committees) ? item.committees.join(', ') : item.committees) : '—')}</td>
+                </tr>
                 ${entries.map(h => {
                     const isHearing = h.change_label && h.change_label.startsWith('Hearing Scheduled');
                     return `<tr>
@@ -138,6 +142,10 @@ export default async function handler(req, res) {
                     <td style="padding: 2px 0; color: #374151;">${item.category || '—'}</td>
                     <td style="padding: 2px 8px 2px 16px; color: #6b7280;">Priority</td>
                     <td style="padding: 2px 0; color: #374151;">${item.priority || '—'}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 2px 8px 2px 0; color: #6b7280;">${item.is_manual_entry ? 'Agency' : 'Committee'}</td>
+                    <td colspan="3" style="padding: 2px 0; color: #374151;">${item.is_manual_entry ? (item.agency || '—') : (item.committees && item.committees.length > 0 ? (Array.isArray(item.committees) ? item.committees.join(', ') : item.committees) : '—')}</td>
                 </tr>
                 ${item.introduced_by ? `<tr><td style="padding: 2px 8px 2px 0; color: #6b7280;">Sponsor</td><td colspan="3" style="padding: 2px 0; color: #374151;">${item.introduced_by}</td></tr>` : ''}
                 ${hasHearing ? `<tr><td style="padding: 4px 8px 2px 0; color: #d97706; font-weight: 600;">📅 Hearing</td><td colspan="3" style="padding: 4px 0; color: #d97706; font-weight: 600;">${formatDate(item.next_hearing_date)}</td></tr>` : ''}
