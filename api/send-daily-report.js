@@ -192,12 +192,8 @@ export default async function handler(req, res) {
             <table style="width: 100%; text-align: center; border-collapse: collapse;">
                 <tr>
                     <td style="padding: 8px; border-right: 1px solid #e5e7eb;">
-                        <div style="font-size: 28px; font-weight: 700; color: #dc2626;">${actionNeeded.length}</div>
-                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Action Needed</div>
-                    </td>
-                    <td style="padding: 8px; border-right: 1px solid #e5e7eb;">
-                        <div style="font-size: 28px; font-weight: 700; color: #2563eb;">${monitorAndAssess.length}</div>
-                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Monitor & Assess</div>
+                        <div style="font-size: 28px; font-weight: 700; color: #854d0e;">${changesSinceLastRun}</div>
+                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Updates Since Yesterday</div>
                     </td>
                     <td style="padding: 8px; border-right: 1px solid #e5e7eb;">
                         <div style="font-size: 28px; font-weight: 700; color: #d97706;">${withHearings.length}</div>
@@ -205,11 +201,15 @@ export default async function handler(req, res) {
                     </td>
                     <td style="padding: 8px; border-right: 1px solid #e5e7eb;">
                         <div style="font-size: 28px; font-weight: 700; color: #16a34a;">${recentlyUpdated.length}</div>
-                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Recent Updates</div>
+                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Updates Last 7 Days</div>
+                    </td>
+                    <td style="padding: 8px; border-right: 1px solid #e5e7eb;">
+                        <div style="font-size: 28px; font-weight: 700; color: #dc2626;">${actionNeeded.length}</div>
+                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Action Needed</div>
                     </td>
                     <td style="padding: 8px;">
-                        <div style="font-size: 28px; font-weight: 700; color: #374151;">${items.length}</div>
-                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Total Tracked</div>
+                        <div style="font-size: 28px; font-weight: 700; color: #2563eb;">${monitorAndAssess.length}</div>
+                        <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">Monitor & Assess</div>
                     </td>
                 </tr>
             </table>
@@ -243,8 +243,8 @@ export default async function handler(req, res) {
                         <tr>
                             <td style="padding: 2px 8px 2px 0; color: #6b7280;">Bill</td>
                             <td style="padding: 2px 0; color: #374151;">${item.bill_number || item.id}</td>
-                            <td style="padding: 2px 8px 2px 16px; color: #6b7280;">Committee</td>
-                            <td style="padding: 2px 0; color: #374151;">${item.committees && item.committees.length > 0 ? (Array.isArray(item.committees) ? item.committees.join(', ') : item.committees) : '—'}</td>
+                            <td style="padding: 2px 8px 2px 16px; color: #6b7280;">${item.is_manual_entry ? 'Agency' : 'Committee'}</td>
+                            <td style="padding: 2px 0; color: #374151;">${item.is_manual_entry ? (item.agency || '—') : (item.committees && item.committees.length > 0 ? (Array.isArray(item.committees) ? item.committees.join(', ') : item.committees) : '—')}</td>
                         </tr>
                         <tr>
                             <td style="padding: 2px 8px 2px 0; color: #6b7280;">Status</td>
