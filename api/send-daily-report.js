@@ -77,9 +77,11 @@ export default async function handler(req, res) {
 
     // Recent updates: LIMS activity in last 7 days OR manually added in last 7 days
     const recentlyUpdated = items.filter(i => {
-        const actDate = i.latest_activity_date ? new Date(i.latest_activity_date) : null;
+        // Use detected change dates from history, not LIMS activity dates (which can be future hearing dates)
+        const hasRecentHistory = (historyMap[i.id] || []).some(h => new Date(h.changed_at) >= sevenDaysAgo);
         const addedDate = i.tracked_at ? new Date(i.tracked_at) : null;
-        return (actDate && actDate >= sevenDaysAgo) || (i.is_manual_entry && addedDate && addedDate >= sevenDaysAgo);
+        const recentlyAdded = addedDate && addedDate >= sevenDaysAgo;
+        return hasRecentHistory || recentlyAdded;
     }).sort((a, b) => {
         const da = new Date(a.latest_activity_date || a.tracked_at || 0);
         const db = new Date(b.latest_activity_date || b.tracked_at || 0);
