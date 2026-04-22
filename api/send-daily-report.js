@@ -75,7 +75,14 @@ export default async function handler(req, res) {
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const sevenDaysAgo = new Date(now); sevenDaysAgo.setDate(now.getDate() - 7);
 
-    // Recent updates: LIMS activity in last 7 days OR manually added in last 7 days
+    // Build status history map per item
+    const historyMap = {};
+    statusHistory.forEach(h => {
+        if (!historyMap[h.item_id]) historyMap[h.item_id] = [];
+        historyMap[h.item_id].push(h);
+    });
+
+    // Recent updates: items with a detected change in the last 7 days OR newly added in last 7 days
     const recentlyUpdated = items.filter(i => {
         // Use detected change dates from history, not LIMS activity dates (which can be future hearing dates)
         const hasRecentHistory = (historyMap[i.id] || []).some(h => new Date(h.changed_at) >= sevenDaysAgo);
@@ -86,13 +93,6 @@ export default async function handler(req, res) {
         const da = new Date(a.latest_activity_date || a.tracked_at || 0);
         const db = new Date(b.latest_activity_date || b.tracked_at || 0);
         return db - da;
-    });
-
-    // Build status history map per item
-    const historyMap = {};
-    statusHistory.forEach(h => {
-        if (!historyMap[h.item_id]) historyMap[h.item_id] = [];
-        historyMap[h.item_id].push(h);
     });
 
     // Changes since yesterday's 8:30am run
