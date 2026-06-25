@@ -5,12 +5,10 @@
  * Runs Mon-Fri at 5pm ET (22:00 UTC).
  */
 
-import nodemailer from 'nodemailer';
+import { sendEmail } from './_mailer.js';
 
 const SUPABASE_URL         = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const GMAIL_USER           = process.env.GMAIL_USER;
-const GMAIL_APP_PASSWORD   = process.env.GMAIL_APP_PASSWORD;
 const DAILY_REPORT_TO      = process.env.DAILY_REPORT_TO;
 const CRON_SECRET          = process.env.CRON_SECRET;
 
@@ -35,8 +33,8 @@ export default async function handler(req, res) {
     const isVercelCron = req.headers['x-vercel-cron'] === '1';
     const isManual = CRON_SECRET && req.headers['authorization'] === `Bearer ${CRON_SECRET}`;
     if (!isVercelCron && !isManual) return res.status(401).json({ error: 'Unauthorized' });
-    if (!GMAIL_USER || !GMAIL_APP_PASSWORD || !DAILY_REPORT_TO) {
-        return res.status(500).json({ error: 'Missing email config', vars: { GMAIL_USER: !!GMAIL_USER, GMAIL_APP_PASSWORD: !!GMAIL_APP_PASSWORD, DAILY_REPORT_TO: !!DAILY_REPORT_TO } });
+    if (!DAILY_REPORT_TO) {
+        return res.status(500).json({ error: 'Missing DAILY_REPORT_TO' });
     }
 
     try {
@@ -225,17 +223,11 @@ export default async function handler(req, res) {
 </body>
 </html>`;
 
-    const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD }
-    });
-
-    const toAddresses = DAILY_REPORT_TO.split(',').map(e => e.trim()).filter(Boolean);
-    await transporter.sendMail({
-        from: `"DC Policy Tracker" <${GMAIL_USER}>`,
-        to: toAddresses.join(', '),
+    await sendEmail({
+        to: DAILY_REPORT_TO,
         subject: `📋 DC Policy EOD — ${statusChanges.length} status change${statusChanges.length !== 1 ? 's' : ''}, ${hearingChanges.length} new hearing${hearingChanges.length !== 1 ? 's' : ''}, ${newlyTracked.length} newly tracked · ${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
-        html
+    html
+    
     });
 
     console.log(`[send-eod-report] Sent — ${statusChanges.length} status changes, ${hearingChanges.length} new hearings`);
