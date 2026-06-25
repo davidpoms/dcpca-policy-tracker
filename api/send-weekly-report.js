@@ -6,17 +6,17 @@
  * Less internal detail than the daily — no notes, no per-item priority.
  *
  * Env vars required:
- *   RESEND_API_KEY
  *   SUPABASE_URL
  *   SUPABASE_SERVICE_KEY
  *   WEEKLY_REPORT_TO   — comma-separated list: "alice@org.com,bob@org.com"
  *   CRON_SECRET
  */
 
+import { sendEmail } from './_mailer.js';
+
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const WEEKLY_REPORT_TO = process.env.WEEKLY_REPORT_TO; // comma-separated
+const WEEKLY_REPORT_TO = process.env.WEEKLY_REPORT_TO;
 const CRON_SECRET = process.env.CRON_SECRET;
 
 async function supabaseGet(path) {
@@ -47,7 +47,7 @@ export default async function handler(req, res) {
     const isVercelCron = req.headers['x-vercel-cron'] === '1';
     const isManual = CRON_SECRET && req.headers['authorization'] === `Bearer ${CRON_SECRET}`;
     if (!isVercelCron && !isManual) return res.status(401).json({ error: 'Unauthorized' });
-    if (!RESEND_API_KEY || !WEEKLY_REPORT_TO) return res.status(500).json({ error: 'Missing RESEND_API_KEY or WEEKLY_REPORT_TO' });
+    if (!WEEKLY_REPORT_TO) return res.status(500).json({ error: 'Missing WEEKLY_REPORT_TO' });
 
     const items = await supabaseGet('/tracked_items?select=*&order=tracked_at.desc');
     const statusHistory = await supabaseGet('/bill_status_history?select=*&order=changed_at.desc');
@@ -259,29 +259,13 @@ export default async function handler(req, res) {
     </body>
     </html>`;
 
+  await sendEmail({
+    to: WEEKLY_REPORT_TO,
+    subject: `DC Policy Tracker Week of ${weekLabel} · ${changesSinceLastRun} update${changesSinceLastRun !== 1 ? 's' : ''} this week · ${actionNeeded.length} action needed · ${withHearings.length} upcoming hearings`,
+    html
+});
+
     const toAddresses = WEEKLY_REPORT_TO.split(',').map(e => e.trim()).filter(Boolean);
-
-    const emailRes = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${RESEND_API_KEY}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            from: 'DC Policy Tracker <onboarding@resend.dev>', 
-            to: toAddresses,
-            subject: `DC Policy Tracker Week of ${weekLabel} · ${changesSinceLastRun} update${changesSinceLastRun !== 1 ? 's' : ''} this week · ${actionNeeded.length} action needed · ${withHearings.length} upcoming hearings`,
-            html
-        })
-    });
-
-    if (!emailRes.ok) {
-        const err = await emailRes.text();
-        console.error('Resend error:', err);
-        return res.status(500).json({ error: 'Email send failed', detail: err });
-    }
-
-    const result = await emailRes.json();
-    console.log(`[weekly-report] Sent to ${toAddresses.join(', ')}, id: ${result.id}`);
-    return res.status(200).json({ sent: true, to: toAddresses, id: result.id });
+    console.log(`[weekly-report] Sent to ${toAddresses.join(', ')}`);
+    return res.status(200).json({ sent: true, to: toAddresses });
 }
