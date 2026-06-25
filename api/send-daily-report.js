@@ -5,20 +5,16 @@
  * Runs Mon–Fri at 8:30am ET (13:30 UTC).
  *
  * Env vars required:
- *   GMAIL_USER          — your Gmail address
- *   GMAIL_APP_PASSWORD  — 16-char app password from myaccount.google.com/apppasswords
  *   DAILY_REPORT_TO     — recipient email (can be same as GMAIL_USER)
  *   SUPABASE_URL
  *   SUPABASE_SERVICE_KEY
  *   CRON_SECRET
  */
 
-import nodemailer from 'nodemailer';
+import { sendEmail } from './_mailer.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const GMAIL_USER = process.env.GMAIL_USER;
-const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
 const DAILY_REPORT_TO = process.env.DAILY_REPORT_TO;
 const CRON_SECRET = process.env.CRON_SECRET;
 
@@ -54,8 +50,8 @@ export default async function handler(req, res) {
     const isVercelCron = req.headers['x-vercel-cron'] === '1';
     const isManual = CRON_SECRET && req.headers['authorization'] === `Bearer ${CRON_SECRET}`;
     if (!isVercelCron && !isManual) return res.status(401).json({ error: 'Unauthorized' });
-    if (!GMAIL_USER || !GMAIL_APP_PASSWORD || !DAILY_REPORT_TO) {
-        return res.status(500).json({ error: 'Missing GMAIL_USER, GMAIL_APP_PASSWORD, or DAILY_REPORT_TO' });
+    if (!DAILY_REPORT_TO) {
+        return res.status(500).json({ error: 'Missing DAILY_REPORT_TO' });
     }
 
     try {
@@ -287,21 +283,10 @@ export default async function handler(req, res) {
     </body>
     </html>`;
 
-    const transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
-        auth: {
-            user: GMAIL_USER,
-            pass: GMAIL_APP_PASSWORD
-        }
-    });
-
-    await transporter.sendMail({
-        from: `DC Policy Tracker <${GMAIL_USER}>`,
+    await sendEmail({
         to: DAILY_REPORT_TO,
         subject: `DC Policy Tracker ${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${changesSinceLastRun} update${changesSinceLastRun !== 1 ? 's' : ''} since yesterday · ${actionNeeded.length} action needed · ${withHearings.length} upcoming hearings`,
-        html
+    html
     });
 
     console.log(`[daily-report] Sent to ${DAILY_REPORT_TO}`);
