@@ -116,8 +116,9 @@ Set all of these in Vercel under **Settings → Environment Variables**.
 | Variable | Required | Description |
 |---|---|---|
 | `SUPABASE_URL` | ✅ | Your Supabase project URL (e.g. `https://xxxx.supabase.co`) |
+| `SUPABASE_PUBLISHABLE_KEY` | ✅ | Supabase publishable key used by the browser client; safe to expose through `/api/client-config` |
 | `SUPABASE_SERVICE_KEY` | ✅ | Supabase service role key — server-side API functions only, never sent to the browser |
-| `CRON_SECRET` | ✅ | Strong passphrase authorizing manual API calls; also used to sign session tokens |
+| `CRON_SECRET` | ✅ | Strong passphrase authorizing cron and utility API calls |
 | `APP_PASSWORD` | ✅ | Shared password staff use to access the tracker app |
 | `GMAIL_USER` | ✅ | Gmail address used to send reports |
 | `GMAIL_APP_PASSWORD` | ✅ | 16-character Gmail app password ([generate here](https://myaccount.google.com/apppasswords)) |
@@ -281,7 +282,7 @@ When DC Council begins a new period (e.g. Period 27), update the following:
 ## Troubleshooting
 
 **Password screen appears even after entering the correct password**
-→ Confirm `APP_PASSWORD` is set in Vercel environment variables and that a redeploy has happened since adding it. Also confirm `CRON_SECRET` is set — it doubles as the session signing key.
+→ Confirm `APP_PASSWORD` is set in Vercel environment variables and that a redeploy has happened since adding it. Also confirm `CRON_SECRET` is set for protected cron and utility endpoints.
 
 **Supabase returning 403 errors for normal app operations**
 → RLS is blocking the request. Confirm `rls_migration.sql` ran successfully. Check policies in Supabase → Authentication → Policies.

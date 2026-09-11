@@ -14,9 +14,19 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        const SUPABASE_URL = 'https://owqylzpuxwsldepufxep.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_IWFsW7Fp1xUzKkr82yVavw_wu236ZdP';
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        let supabase;
+
+        async function initializeSupabase() {
+            const response = await fetch('/api/client-config');
+            if (!response.ok) throw new Error('Client configuration is unavailable.');
+
+            const config = await response.json();
+            if (!config.SUPABASE_URL || !config.SUPABASE_PUBLISHABLE_KEY) {
+                throw new Error('Client configuration is incomplete.');
+            }
+
+            supabase = window.supabase.createClient(config.SUPABASE_URL, config.SUPABASE_PUBLISHABLE_KEY);
+        }
 
         // ─── Hearing parser ───────────────────────────────────────────────────────────
         function extractNextHearing(details) {
@@ -346,7 +356,7 @@
             const [statusHistory, setStatusHistory] = useState({}); // item_id -> [{old_status, new_status, changed_at, change_label}]
             const [expandedHistory, setExpandedHistory] = useState(new Set());
 
-            const PROXY_URL = 'https://dcpca-policy-tracker.vercel.app/api/hello';
+            const PROXY_URL = '/api/hello';
 
             useEffect(() => {
                 loadFromSupabase();
@@ -2312,7 +2322,12 @@
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<DCPolicyTracker />);
+        initializeSupabase()
+            .then(() => root.render(<DCPolicyTracker />))
+            .catch(error => {
+                console.error('Failed to initialize the application:', error);
+                root.render(<div style={{ padding: 24, fontFamily: 'sans-serif' }}>Unable to load application configuration.</div>);
+            });
     </script>
 </body>
 </html>

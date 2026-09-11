@@ -162,9 +162,8 @@ async function sendEmail(subject, html) {
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
-    const isVercelCron = req.headers['x-vercel-cron'] === '1';
     const isManual = CRON_SECRET && req.headers['authorization'] === `Bearer ${CRON_SECRET}`;
-    if (!isVercelCron && !isManual) return res.status(401).json({ error: 'Unauthorized' });
+    if (!isManual) return res.status(401).json({ error: 'Unauthorized' });
 
     const now = new Date();
     const results = { checked: 0, statusChanges: [], newKeywordMatches: [], errors: [] };

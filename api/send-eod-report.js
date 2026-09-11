@@ -30,9 +30,8 @@ function formatDate(iso) {
 }
 
 export default async function handler(req, res) {
-    const isVercelCron = req.headers['x-vercel-cron'] === '1';
     const isManual = CRON_SECRET && req.headers['authorization'] === `Bearer ${CRON_SECRET}`;
-    if (!isVercelCron && !isManual) return res.status(401).json({ error: 'Unauthorized' });
+    if (!isManual) return res.status(401).json({ error: 'Unauthorized' });
     if (!DAILY_REPORT_TO) {
         return res.status(500).json({ error: 'Missing DAILY_REPORT_TO' });
     }

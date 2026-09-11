@@ -13,7 +13,7 @@
  * PowerShell loop to run until done:
  *   $headers = @{ "Authorization" = "Bearer YOUR_SECRET" }
  *   do {
- *     $r = Invoke-WebRequest -Uri "https://dcpca-policy-tracker.vercel.app/api/build-bill-cache" -Method POST -Headers $headers
+ *     $r = Invoke-WebRequest -Uri "https://YOUR-APP.vercel.app/api/build-bill-cache" -Method POST -Headers $headers
  *     $body = $r.Content | ConvertFrom-Json
  *     Write-Host "$($body.position)/$($body.total) — $($body.status)"
  *     Start-Sleep 5
@@ -25,7 +25,7 @@
 const SUPABASE_URL   = process.env.SUPABASE_URL;
 const SUPABASE_KEY   = process.env.SUPABASE_SERVICE_KEY;
 const CRON_SECRET    = process.env.CRON_SECRET;
-const PROXY_URL      = 'https://dcpca-policy-tracker.vercel.app/api/hello';
+const PROXY_URL      = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/api/hello` : null;
 const COUNCIL_PERIOD = 26;
 const PAGE_SIZE      = 100;  // bills per SearchLegislation page
 const BATCH_SIZE     = 20;   // detail fetches per invocation
@@ -96,9 +96,10 @@ const parseMembers = (val) =>
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
-    const isVercelCron = req.headers['x-vercel-cron'] === '1';
+    if (!PROXY_URL) return res.status(500).json({ error: 'VERCEL_URL not configured' });
+
     const isManual = CRON_SECRET && req.headers['authorization'] === `Bearer ${CRON_SECRET}`;
-    if (!isVercelCron && !isManual) return res.status(401).json({ error: 'Unauthorized' });
+    if (!isManual) return res.status(401).json({ error: 'Unauthorized' });
 
     const reset = req.query?.reset === 'true' || req.body?.reset === true;
     if (reset) {

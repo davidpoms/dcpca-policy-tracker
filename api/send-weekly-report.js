@@ -44,9 +44,8 @@ function formatChangeLabel(h) {
 }
 
 export default async function handler(req, res) {
-    const isVercelCron = req.headers['x-vercel-cron'] === '1';
     const isManual = CRON_SECRET && req.headers['authorization'] === `Bearer ${CRON_SECRET}`;
-    if (!isVercelCron && !isManual) return res.status(401).json({ error: 'Unauthorized' });
+    if (!isManual) return res.status(401).json({ error: 'Unauthorized' });
     if (!WEEKLY_REPORT_TO) return res.status(500).json({ error: 'Missing WEEKLY_REPORT_TO' });
 
     const items = await supabaseGet('/tracked_items?select=*&order=tracked_at.desc');

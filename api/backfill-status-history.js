@@ -6,7 +6,7 @@
  * This gives the "Since" field in reports a real wall-clock anchor date.
  *
  * Run once via PowerShell:
- *   Invoke-WebRequest -Uri "https://dcpca-policy-tracker.vercel.app/api/backfill-status-history" -Method POST -Headers @{ "Authorization" = "Bearer dcpcapolicyhearingtracker" } -UseBasicParsing
+ *   Invoke-WebRequest -Uri "https://dcpca-policy-tracker.vercel.app/api/backfill-status-history" -Method POST -Headers @{ "Authorization" = "Bearer <CRON_SECRET>" } -UseBasicParsing
  */
 
 const SUPABASE_URL  = process.env.SUPABASE_URL;
