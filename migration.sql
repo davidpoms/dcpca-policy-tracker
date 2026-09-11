@@ -160,3 +160,18 @@ INSERT INTO tracked_agencies (agency_name) VALUES
   ('Department of Insurance, Securities, and Banking'),
   ('Deputy Mayor for Health and Human Services')
 ON CONFLICT (agency_name) DO NOTHING;
+
+create table if not exists public.activity_log (
+  id serial primary key,
+  action text not null,
+  item_id text,
+  item_title text,
+  details jsonb,
+  created_at timestamp without time zone default now()
+);
+
+create index if not exists idx_activity_log_item
+  on public.activity_log (item_id);
+
+create index if not exists idx_activity_log_created
+  on public.activity_log (created_at desc);
