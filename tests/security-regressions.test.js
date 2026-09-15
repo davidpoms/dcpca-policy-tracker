@@ -195,7 +195,7 @@ test('api/check-password.js never returns secret values in the response body', a
 });
 
 test('server session helpers accept a valid signed session and reject tampered, expired, or malformed values', async () => {
-  const moduleNamespace = await importFreshModule('api/_session.js');
+  const moduleNamespace = await importFreshModule('lib/session.js');
   const { createSignedSession, validateSignedSession, getSessionCookieValue } = moduleNamespace;
 
   await withEnv({ SESSION_SECRET: 'session-secret-for-tests' }, async () => {
@@ -224,7 +224,7 @@ test('server session helpers accept a valid signed session and reject tampered, 
 
 test('api/session.js validates real sessions and rejects missing or invalid ones', async () => {
   const sessionHandler = await importFresh('api/session.js');
-  const moduleNamespace = await importFreshModule('api/_session.js');
+  const moduleNamespace = await importFreshModule('lib/session.js');
   const { createSignedSession } = moduleNamespace;
 
   await withEnv({ SESSION_SECRET: 'real-session-secret' }, async () => {
@@ -387,11 +387,29 @@ test('repository guardrails block historical secret and production URL drift', (
   }
 });
 
-test('server-side JavaScript files in /api pass node syntax checks', async () => {
+test('server-side JavaScript files in /api and /lib pass node syntax checks', async () => {
   const apiFiles = collectApiFiles();
+  const libFiles = fs.readdirSync(path.join(projectRoot, 'lib'))
+    .filter((file) => file.endsWith('.js'))
+    .sort();
 
   for (const file of apiFiles) {
     const filePath = path.join(projectRoot, 'api', file);
+    let status = 0;
+    let stderr = '';
+
+    try {
+      execFileSync(process.execPath, ['--check', filePath], { stdio: 'pipe' });
+    } catch (error) {
+      status = error.status ?? 1;
+      stderr = error.stderr?.toString() || error.message;
+    }
+
+    assert.equal(status, 0, `Syntax check failed for ${file}: ${stderr}`);
+  }
+
+  for (const file of libFiles) {
+    const filePath = path.join(projectRoot, 'lib', file);
     let status = 0;
     let stderr = '';
 

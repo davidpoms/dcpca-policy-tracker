@@ -9,7 +9,7 @@
  *   SESSION_SECRET  — server-side secret used to sign the cookie contents
  */
 
-import { createSignedSession, buildSessionCookie, SESSION_MAX_MS } from './_session.js';
+import { createSignedSession, buildSessionCookie, SESSION_MAX_MS } from '../lib/session.js';
 
 export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-store');

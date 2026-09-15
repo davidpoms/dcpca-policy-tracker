@@ -1,5 +1,5 @@
 // api/test-mail.js  (delete after confirming it works)
-import { sendEmail } from "./_mailer.js";
+import { sendEmail } from "../lib/mailer.js";
 
 export default async function handler(req, res) {
   try {

@@ -175,7 +175,7 @@ The following checks were verified against the current branch state rather than 
 ### Finding 8.1 — Email provider stack remains inconsistent and partially mixed
 - Status: PARTIALLY RESOLVED
 - Severity: High
-- Relevant files: [api/_mailer.js](api/_mailer.js), [api/check-hearings.js](api/check-hearings.js), [api/send-daily-report.js](api/send-daily-report.js), [api/send-weekly-report.js](api/send-weekly-report.js), [README.md](README.md)
+- Relevant files: [lib/mailer.js](lib/mailer.js), [api/check-hearings.js](api/check-hearings.js), [api/send-daily-report.js](api/send-daily-report.js), [api/send-weekly-report.js](api/send-weekly-report.js), [README.md](README.md)
 - Why it matters: There is a Microsoft Graph mailer, but [api/check-hearings.js](api/check-hearings.js) still uses Gmail SMTP and the README still documents a mixed stack in places. That is a real operational and maintenance risk.
 - Smallest reasonable remediation: Standardize on one mail provider and one sender config path.
 - Regression tests that should exist before changing it: provider smoke tests and config-validation tests for each email route.
@@ -183,7 +183,7 @@ The following checks were verified against the current branch state rather than 
 ### Finding 8.2 — Mail config validation is not fully consistent across routes
 - Status: OPEN
 - Severity: Medium
-- Relevant files: [api/_mailer.js](api/_mailer.js), [api/check-hearings.js](api/check-hearings.js), [api/send-daily-report.js](api/send-daily-report.js), [api/send-eod-report.js](api/send-eod-report.js), [api/send-weekly-report.js](api/send-weekly-report.js)
+- Relevant files: [lib/mailer.js](lib/mailer.js), [api/check-hearings.js](api/check-hearings.js), [api/send-daily-report.js](api/send-daily-report.js), [api/send-eod-report.js](api/send-eod-report.js), [api/send-weekly-report.js](api/send-weekly-report.js)
 - Why it matters: Some routes fail early; some warn and continue. This still hides operational failures and makes delivery reliability harder to understand.
 - Smallest reasonable remediation: Add a single mail-config validation helper and fail clearly when required env vars are absent.
 - Regression tests that should exist before changing it: tests for missing config and provider failure responses.
@@ -231,7 +231,7 @@ The following checks were verified against the current branch state rather than 
 ### Finding 10.3 — Some operational examples still contain production-like URLs in comments and sample docs
 - Status: PARTIALLY RESOLVED
 - Severity: Low
-- Relevant files: [README.md](README.md), [api/backfill-status-history.js](api/backfill-status-history.js)
+- Relevant files: [README.md](README.md), the removed one-time backfill route
 - Why it matters: The app is better than it was historically, but examples and docs still contain deployment-style URLs and secret placeholders that can be copied under pressure.
 - Smallest reasonable remediation: Standardize examples on generic placeholders and remove stale production examples where possible.
 - Regression tests that should exist before changing it: repo-scanning checks for forbidden patterns and explicit production domains.
@@ -243,7 +243,7 @@ The following checks were verified against the current branch state rather than 
 ### Finding 11.1 — The one-time backfill utility still exists in the repo
 - Status: PARTIALLY RESOLVED
 - Severity: Medium
-- Relevant files: [api/backfill-status-history.js](api/backfill-status-history.js), [README.md](README.md)
+- Relevant files: the removed one-time backfill route, [README.md](README.md)
 - Why it matters: The code still exists and is still deployed as part of the route set. The project documentation still says it should be removed after use, and there is no evidence it was deleted from the current branch. That is operational debt and an unnecessary route surface.
 - Smallest reasonable remediation: Remove it if no longer needed or gate it to local-only use with a clear “do not deploy” annotation.
 - Regression tests that should exist before changing it: a deploy guard that fails if one-off scripts remain in the default route set.

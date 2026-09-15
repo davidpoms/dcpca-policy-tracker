@@ -43,10 +43,13 @@ A self-hosted web application for tracking DC Council legislation and DC Registe
 │   ├── send-eod-report.js          # Cron: end-of-day report if any updates (Mon–Fri 5pm ET)
 │   ├── send-weekly-report.js       # Cron: weekly summary (Monday 5pm ET)
 │   ├── build-bill-cache.js         # Cron + manual: builds LIMS bill cache for search
-│   └── backfill-status-history.js  # One-time utility — DELETE FROM REPO AFTER USE
+│   └── test-mail.js                # Local mail smoke test (not a production route contract)
+├── lib/
+│   ├── session.js                  # Shared signed-cookie session helpers
+│   └── mailer.js                   # Shared email helper
 ```
 
-> **`backfill-status-history.js` should be deleted from the repository after the one-time backfill is run.** Leaving a permanently deployed endpoint with no ongoing purpose is unnecessary attack surface.
+> The obsolete one-time backfill endpoint has been removed from the repo and is no longer part of the deployable route set.
 
 ---
 
@@ -156,7 +159,7 @@ Set all of these in Vercel under **Settings → Environment Variables**.
 - [ ] `rls_migration.sql` has been run in Supabase SQL Editor
 - [ ] Supabase → Authentication → Settings: "Enable sign ups" is **disabled**
 - [ ] Supabase database password saved securely (e.g. 1Password)
-- [ ] `backfill-status-history.js` deleted from repo after one-time use
+- [x] obsolete one-time backfill endpoint removed from repo
 
 ### Credential rotation
 
@@ -226,13 +229,7 @@ do {
 
 ### 6. Backfill status history
 
-Run once to seed `bill_status_history` for all currently tracked items:
-
-```powershell
-Invoke-WebRequest -Uri "https://YOUR-APP.vercel.app/api/backfill-status-history" -Method POST -Headers @{ "Authorization" = "Bearer YOUR_CRON_SECRET" } -UseBasicParsing
-```
-
-After confirming it ran successfully, **delete `backfill-status-history.js` from the repository**.
+This one-time backfill utility has been removed from the repo and should not be restored as a deployable API route.
 
 ---
 

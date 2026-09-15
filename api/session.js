@@ -1,4 +1,4 @@
-import { getSessionCookieValue, validateSignedSession } from './_session.js';
+import { getSessionCookieValue, validateSignedSession } from '../lib/session.js';
 
 export default function handler(req, res) {
     res.setHeader('Cache-Control', 'no-store');
