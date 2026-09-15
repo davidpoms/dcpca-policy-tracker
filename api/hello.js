@@ -26,6 +26,10 @@ export default async function handler(req, res) {
   if (!endpoint) {
     return res.status(400).json({ error: 'endpoint parameter required' });
   }
+
+  if (!process.env.LIMS_API_KEY) {
+    return res.status(500).json({ error: 'LIMS configuration unavailable' });
+  }
   
   const API_KEY = process.env.LIMS_API_KEY;
   const url = `https://lims.dccouncil.gov/api/v2/PublicData${endpoint}`;

@@ -248,6 +248,34 @@ test('api/session.js validates real sessions and rejects missing or invalid ones
   });
 });
 
+test('api/hello.js returns 500 without LIMS_API_KEY and does not fetch upstream', async () => {
+  const handler = await importFresh('api/hello.js');
+  const originalFetch = global.fetch;
+  let fetchCalled = false;
+
+  global.fetch = async () => {
+    fetchCalled = true;
+    throw new Error('fetch should not be called when LIMS_API_KEY is missing');
+  };
+
+  try {
+    await withEnv({ LIMS_API_KEY: undefined }, async () => {
+      const req = { method: 'POST', body: { endpoint: '/SomeEndpoint', method: 'GET' } };
+      const res = makeRes();
+
+      await handler(req, res);
+
+      assert.equal(res.statusCode, 500);
+      assert.equal(res.body.error, 'LIMS configuration unavailable');
+      assert.ok(!('LIMS_API_KEY' in res.body));
+      assert.ok(!('Authorization' in JSON.stringify(res.body)));
+      assert.equal(fetchCalled, false);
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('api/check-password.js returns 500 when SESSION_SECRET is missing', async () => {
   const handler = await importFresh('api/check-password.js');
 
