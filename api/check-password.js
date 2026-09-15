@@ -18,13 +18,16 @@ export default async function handler(req, res) {
 
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
     if (!APP_PASSWORD) return res.status(500).json({ error: 'APP_PASSWORD not configured' });
-    if (!process.env.SESSION_SECRET) return res.status(500).json({ error: 'Session configuration unavailable' });
 
     const { password } = req.body || {};
     if (!password || password !== APP_PASSWORD) {
         // Small delay to slow brute force attempts
         await new Promise(r => setTimeout(r, 600));
         return res.status(401).json({ error: 'Incorrect password' });
+    }
+
+    if (!process.env.SESSION_SECRET) {
+        return res.status(500).json({ error: 'Session configuration unavailable' });
     }
 
     try {

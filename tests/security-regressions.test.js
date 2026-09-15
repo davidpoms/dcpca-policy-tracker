@@ -71,6 +71,32 @@ async function importFresh(relativePath, envValues = {}) {
   return imported.default;
 }
 
+async function importFreshModule(relativePath, envValues = {}) {
+  const previousValues = {};
+  for (const [key] of Object.entries(envValues)) {
+    previousValues[key] = process.env[key];
+    if (envValues[key] === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = envValues[key];
+    }
+  }
+
+  const filePath = path.join(projectRoot, relativePath);
+  const moduleUrl = `${pathToFileURL(filePath).href}?t=${Date.now()}-${Math.random()}`;
+  const imported = await import(moduleUrl);
+
+  for (const [key, existingValue] of Object.entries(previousValues)) {
+    if (existingValue === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = existingValue;
+    }
+  }
+
+  return imported;
+}
+
 async function withEnv(envValues, callback) {
   const previousValues = {};
 
@@ -97,11 +123,13 @@ async function withEnv(envValues, callback) {
 }
 
 test('api/check-password.js rejects a wrong password', async () => {
-  const handler = await importFresh('api/check-password.js', { APP_PASSWORD: 'correct-password' });
+  const handler = await importFresh('api/check-password.js');
   const req = { method: 'POST', body: { password: 'wrong-password' } };
   const res = makeRes();
 
-  await handler(req, res);
+  await withEnv({ APP_PASSWORD: 'correct-password' }, async () => {
+    await handler(req, res);
+  });
 
   assert.equal(res.statusCode, 401);
   assert.equal(res.body.error, 'Incorrect password');
@@ -111,18 +139,20 @@ test('api/check-password.js rejects a wrong password', async () => {
 });
 
 test('api/check-password.js accepts the configured APP_PASSWORD and sets a signed session cookie', async () => {
-  const handler = await importFresh('api/check-password.js', {
-    APP_PASSWORD: 'correct-password',
-    SESSION_SECRET: 'test-session-secret'
-  });
+  const handler = await importFresh('api/check-password.js');
 
   const req1 = { method: 'POST', body: { password: 'correct-password' } };
   const req2 = { method: 'POST', body: { password: 'correct-password' } };
   const res1 = makeRes();
   const res2 = makeRes();
 
-  await handler(req1, res1);
-  await handler(req2, res2);
+  await withEnv({
+    APP_PASSWORD: 'correct-password',
+    SESSION_SECRET: 'test-session-secret'
+  }, async () => {
+    await handler(req1, res1);
+    await handler(req2, res2);
+  });
 
   assert.equal(res1.statusCode, 200);
   assert.equal(res2.statusCode, 200);
@@ -163,53 +193,57 @@ test('api/check-password.js never returns secret values in the response body', a
 });
 
 test('server session helpers accept a valid signed session and reject tampered, expired, or malformed values', async () => {
-  const { createSignedSession, validateSignedSession, getSessionCookieValue } = await importFresh('api/_session.js', {
-    SESSION_SECRET: 'session-secret-for-tests'
+  const moduleNamespace = await importFreshModule('api/_session.js');
+  const { createSignedSession, validateSignedSession, getSessionCookieValue } = moduleNamespace;
+
+  await withEnv({ SESSION_SECRET: 'session-secret-for-tests' }, async () => {
+    const validValue = createSignedSession(Date.now() + 60 * 60 * 1000);
+    const valid = validateSignedSession(validValue);
+    assert.equal(valid.valid, true);
+    assert.equal(typeof valid.expires, 'number');
+
+    const toggleChar = validValue.slice(-1) === 'A' ? 'B' : 'A';
+    const tampered = validValue.slice(0, -1) + toggleChar;
+    assert.equal(validateSignedSession(tampered).valid, false);
+    assert.equal(validateSignedSession('not-a-real-cookie').valid, false);
+
+    const expired = createSignedSession(Date.now() - 1000);
+    assert.equal(validateSignedSession(expired).valid, false);
+
+    const req = {
+      headers: {
+        cookie: `dc_tracker_session=${encodeURIComponent(validValue)}; other=value`
+      }
+    };
+
+    assert.equal(getSessionCookieValue(req), validValue);
   });
-
-  const validValue = createSignedSession(Date.now() + 60 * 60 * 1000);
-  const valid = validateSignedSession(validValue);
-  assert.equal(valid.valid, true);
-  assert.equal(typeof valid.expires, 'number');
-
-  const toggleChar = validValue.slice(-1) === 'A' ? 'B' : 'A';
-  const tampered = validValue.slice(0, -1) + toggleChar;
-  assert.equal(validateSignedSession(tampered).valid, false);
-  assert.equal(validateSignedSession('not-a-real-cookie').valid, false);
-
-  const expired = createSignedSession(Date.now() - 1000);
-  assert.equal(validateSignedSession(expired).valid, false);
-
-  const req = {
-    headers: {
-      cookie: `dc_tracker_session=${encodeURIComponent(validValue)}; other=value`
-    }
-  };
-
-  assert.equal(getSessionCookieValue(req), validValue);
 });
 
 test('api/session.js validates real sessions and rejects missing or invalid ones', async () => {
-  const sessionHandler = await importFresh('api/session.js', { SESSION_SECRET: 'real-session-secret' });
-  const { createSignedSession } = await importFresh('api/_session.js', { SESSION_SECRET: 'real-session-secret' });
+  const sessionHandler = await importFresh('api/session.js');
+  const moduleNamespace = await importFreshModule('api/_session.js');
+  const { createSignedSession } = moduleNamespace;
 
-  const validReq = { method: 'GET', headers: { cookie: `dc_tracker_session=${encodeURIComponent(createSignedSession(Date.now() + 60 * 1000))}` } };
-  const validRes = makeRes();
-  await sessionHandler(validReq, validRes);
-  assert.equal(validRes.statusCode, 200);
-  assert.equal(validRes.body.valid, true);
-  assert.equal(typeof validRes.body.expires, 'number');
-  assert.ok(!('cookie' in validRes.body));
+  await withEnv({ SESSION_SECRET: 'real-session-secret' }, async () => {
+    const validReq = { method: 'GET', headers: { cookie: `dc_tracker_session=${encodeURIComponent(createSignedSession(Date.now() + 60 * 1000))}` } };
+    const validRes = makeRes();
+    await sessionHandler(validReq, validRes);
+    assert.equal(validRes.statusCode, 200);
+    assert.equal(validRes.body.valid, true);
+    assert.equal(typeof validRes.body.expires, 'number');
+    assert.ok(!('cookie' in validRes.body));
 
-  const invalidRes = makeRes();
-  await sessionHandler({ method: 'GET', headers: { } }, invalidRes);
-  assert.equal(invalidRes.statusCode, 401);
+    const invalidRes = makeRes();
+    await sessionHandler({ method: 'GET', headers: { } }, invalidRes);
+    assert.equal(invalidRes.statusCode, 401);
 
-  const tamperedRes = makeRes();
-  const tamperedValue = createSignedSession(Date.now() + 60 * 1000);
-  const tampered = tamperedValue.slice(0, -1) + (tamperedValue.slice(-1) === 'A' ? 'B' : 'A');
-  await sessionHandler({ method: 'GET', headers: { cookie: `dc_tracker_session=${encodeURIComponent(tampered)}` } }, tamperedRes);
-  assert.equal(tamperedRes.statusCode, 401);
+    const tamperedRes = makeRes();
+    const tamperedValue = createSignedSession(Date.now() + 60 * 1000);
+    const tampered = tamperedValue.slice(0, -1) + (tamperedValue.slice(-1) === 'A' ? 'B' : 'A');
+    await sessionHandler({ method: 'GET', headers: { cookie: `dc_tracker_session=${encodeURIComponent(tampered)}` } }, tamperedRes);
+    assert.equal(tamperedRes.statusCode, 401);
+  });
 });
 
 test('api/check-password.js returns 500 when SESSION_SECRET is missing', async () => {
