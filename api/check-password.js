@@ -2,19 +2,23 @@
  * /api/check-password.js
  *
  * Validates the app password submitted from the frontend login screen.
- * Returns an opaque session token the frontend stores in sessionStorage.
+ * Issues a signed HttpOnly cookie-backed session for the browser.
  *
  * Env vars required:
- *   APP_PASSWORD  — the password staff use to access the tracker
+ *   APP_PASSWORD   — the password staff use to access the tracker
+ *   SESSION_SECRET  — server-side secret used to sign the cookie contents
  */
 
-import { randomBytes } from 'node:crypto';
+import { createSignedSession, buildSessionCookie, SESSION_MAX_MS } from './_session.js';
 
 const APP_PASSWORD = process.env.APP_PASSWORD;
 
 export default async function handler(req, res) {
+    res.setHeader('Cache-Control', 'no-store');
+
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
     if (!APP_PASSWORD) return res.status(500).json({ error: 'APP_PASSWORD not configured' });
+    if (!process.env.SESSION_SECRET) return res.status(500).json({ error: 'Session configuration unavailable' });
 
     const { password } = req.body || {};
     if (!password || password !== APP_PASSWORD) {
@@ -23,8 +27,14 @@ export default async function handler(req, res) {
         return res.status(401).json({ error: 'Incorrect password' });
     }
 
-    const timestamp = Date.now();
-    const token = randomBytes(32).toString('hex');
+    try {
+        const expires = Date.now() + SESSION_MAX_MS;
+        const signedSession = createSignedSession(expires);
+        const cookie = buildSessionCookie(signedSession, Math.floor(SESSION_MAX_MS / 1000));
 
-    return res.status(200).json({ token, expires: timestamp + 8 * 60 * 60 * 1000 }); // 8 hour session
+        res.setHeader('Set-Cookie', cookie);
+        return res.status(200).json({ expires });
+    } catch (error) {
+        return res.status(500).json({ error: 'Authentication service unavailable' });
+    }
 }

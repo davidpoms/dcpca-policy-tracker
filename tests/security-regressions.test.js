@@ -10,7 +10,8 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 function makeRes() {
   const res = {
     statusCode: 200,
-    body: undefined
+    body: undefined,
+    headers: {}
   };
 
   res.status = (code) => {
@@ -22,6 +23,13 @@ function makeRes() {
     res.body = payload;
     return payload;
   };
+
+  res.setHeader = (name, value) => {
+    res.headers[name] = value;
+    return value;
+  };
+
+  res.getHeader = (name) => res.headers[name];
 
   return res;
 }
@@ -102,8 +110,11 @@ test('api/check-password.js rejects a wrong password', async () => {
   assert.ok(!res.body.token);
 });
 
-test('api/check-password.js accepts the configured APP_PASSWORD and returns an opaque token', async () => {
-  const handler = await importFresh('api/check-password.js', { APP_PASSWORD: 'correct-password' });
+test('api/check-password.js accepts the configured APP_PASSWORD and sets a signed session cookie', async () => {
+  const handler = await importFresh('api/check-password.js', {
+    APP_PASSWORD: 'correct-password',
+    SESSION_SECRET: 'test-session-secret'
+  });
 
   const req1 = { method: 'POST', body: { password: 'correct-password' } };
   const req2 = { method: 'POST', body: { password: 'correct-password' } };
@@ -115,9 +126,6 @@ test('api/check-password.js accepts the configured APP_PASSWORD and returns an o
 
   assert.equal(res1.statusCode, 200);
   assert.equal(res2.statusCode, 200);
-  assert.match(res1.body.token, /^[a-f0-9]{64}$/i);
-  assert.match(res2.body.token, /^[a-f0-9]{64}$/i);
-  assert.notEqual(res1.body.token, res2.body.token);
   assert.equal(typeof res1.body.expires, 'number');
   assert.equal(typeof res2.body.expires, 'number');
   assert.ok(Math.abs(res1.body.expires - (Date.now() + 8 * 60 * 60 * 1000)) < 60 * 1000);
@@ -126,14 +134,20 @@ test('api/check-password.js accepts the configured APP_PASSWORD and returns an o
   assert.ok(!('CRON_SECRET' in res1.body));
   assert.ok(!('APP_PASSWORD' in res2.body));
   assert.ok(!('CRON_SECRET' in res2.body));
-  assert.notEqual(res1.body.token, 'correct-password');
-  assert.notEqual(res2.body.token, 'correct-password');
+  assert.ok(!('token' in res1.body));
+  assert.ok(!('token' in res2.body));
+  assert.ok(res1.headers['Set-Cookie']);
+  assert.match(res1.headers['Set-Cookie'], /dc_tracker_session=/i);
+  assert.match(res1.headers['Set-Cookie'], /HttpOnly/i);
+  assert.match(res1.headers['Set-Cookie'], /SameSite=Strict/i);
+  assert.notEqual(res1.headers['Set-Cookie'], res2.headers['Set-Cookie']);
 });
 
 test('api/check-password.js never returns secret values in the response body', async () => {
   const handler = await importFresh('api/check-password.js', {
     APP_PASSWORD: 'correct-password',
-    CRON_SECRET: 'super-secret-value'
+    SESSION_SECRET: 'super-secret-value',
+    CRON_SECRET: 'cron-secret-value'
   });
 
   const req = { method: 'POST', body: { password: 'correct-password' } };
@@ -144,7 +158,128 @@ test('api/check-password.js never returns secret values in the response body', a
   const responseText = JSON.stringify(res.body);
   assert.doesNotMatch(responseText, /correct-password/i);
   assert.doesNotMatch(responseText, /super-secret-value/i);
-  assert.doesNotMatch(responseText, /APP_PASSWORD|CRON_SECRET/i);
+  assert.doesNotMatch(responseText, /cron-secret-value/i);
+  assert.doesNotMatch(responseText, /APP_PASSWORD|CRON_SECRET|SESSION_SECRET/i);
+});
+
+test('server session helpers accept a valid signed session and reject tampered, expired, or malformed values', async () => {
+  const { createSignedSession, validateSignedSession, getSessionCookieValue } = await importFresh('api/_session.js', {
+    SESSION_SECRET: 'session-secret-for-tests'
+  });
+
+  const validValue = createSignedSession(Date.now() + 60 * 60 * 1000);
+  const valid = validateSignedSession(validValue);
+  assert.equal(valid.valid, true);
+  assert.equal(typeof valid.expires, 'number');
+
+  const toggleChar = validValue.slice(-1) === 'A' ? 'B' : 'A';
+  const tampered = validValue.slice(0, -1) + toggleChar;
+  assert.equal(validateSignedSession(tampered).valid, false);
+  assert.equal(validateSignedSession('not-a-real-cookie').valid, false);
+
+  const expired = createSignedSession(Date.now() - 1000);
+  assert.equal(validateSignedSession(expired).valid, false);
+
+  const req = {
+    headers: {
+      cookie: `dc_tracker_session=${encodeURIComponent(validValue)}; other=value`
+    }
+  };
+
+  assert.equal(getSessionCookieValue(req), validValue);
+});
+
+test('api/session.js validates real sessions and rejects missing or invalid ones', async () => {
+  const sessionHandler = await importFresh('api/session.js', { SESSION_SECRET: 'real-session-secret' });
+  const { createSignedSession } = await importFresh('api/_session.js', { SESSION_SECRET: 'real-session-secret' });
+
+  const validReq = { method: 'GET', headers: { cookie: `dc_tracker_session=${encodeURIComponent(createSignedSession(Date.now() + 60 * 1000))}` } };
+  const validRes = makeRes();
+  await sessionHandler(validReq, validRes);
+  assert.equal(validRes.statusCode, 200);
+  assert.equal(validRes.body.valid, true);
+  assert.equal(typeof validRes.body.expires, 'number');
+  assert.ok(!('cookie' in validRes.body));
+
+  const invalidRes = makeRes();
+  await sessionHandler({ method: 'GET', headers: { } }, invalidRes);
+  assert.equal(invalidRes.statusCode, 401);
+
+  const tamperedRes = makeRes();
+  const tamperedValue = createSignedSession(Date.now() + 60 * 1000);
+  const tampered = tamperedValue.slice(0, -1) + (tamperedValue.slice(-1) === 'A' ? 'B' : 'A');
+  await sessionHandler({ method: 'GET', headers: { cookie: `dc_tracker_session=${encodeURIComponent(tampered)}` } }, tamperedRes);
+  assert.equal(tamperedRes.statusCode, 401);
+});
+
+test('api/check-password.js returns 500 when SESSION_SECRET is missing', async () => {
+  const handler = await importFresh('api/check-password.js', {
+    APP_PASSWORD: 'correct-password',
+    SESSION_SECRET: undefined,
+    CRON_SECRET: 'cron-secret-value'
+  });
+
+  const req = { method: 'POST', body: { password: 'correct-password' } };
+  const res = makeRes();
+
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.error, 'Session configuration unavailable');
+  assert.doesNotMatch(JSON.stringify(res.body), /SESSION_SECRET|correct-password|cron-secret-value|APP_PASSWORD|CRON_SECRET/i);
+});
+
+test('api/session.js returns 500 when SESSION_SECRET is missing with no cookie or malformed cookie', async () => {
+  const handler = await importFresh('api/session.js', {
+    SESSION_SECRET: undefined,
+    APP_PASSWORD: 'app-password',
+    CRON_SECRET: 'cron-secret-value'
+  });
+
+  const noCookieRes = makeRes();
+  await handler({ method: 'GET', headers: {} }, noCookieRes);
+  assert.equal(noCookieRes.statusCode, 500);
+  assert.equal(noCookieRes.body.error, 'Session configuration unavailable');
+  assert.doesNotMatch(JSON.stringify(noCookieRes.body), /SESSION_SECRET|APP_PASSWORD|CRON_SECRET|app-password|cron-secret-value/i);
+
+  const malformedCookieRes = makeRes();
+  await handler({ method: 'GET', headers: { cookie: 'dc_tracker_session=not-valid' } }, malformedCookieRes);
+  assert.equal(malformedCookieRes.statusCode, 500);
+  assert.equal(malformedCookieRes.body.error, 'Session configuration unavailable');
+  assert.doesNotMatch(JSON.stringify(malformedCookieRes.body), /SESSION_SECRET|APP_PASSWORD|CRON_SECRET|not-valid|app-password|cron-secret-value/i);
+});
+
+test('api/logout.js clears the session cookie', async () => {
+  const handler = await importFresh('api/logout.js', { SESSION_SECRET: 'logout-secret' });
+  const req = { method: 'POST' };
+  const res = makeRes();
+
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ok, true);
+  assert.match(res.headers['Set-Cookie'], /dc_tracker_session=/i);
+  assert.match(res.headers['Set-Cookie'], /Max-Age=0/i);
+  assert.equal(res.headers['Cache-Control'], 'no-store');
+});
+
+test('api/client-config.js does not expose SESSION_SECRET', async () => {
+  const handler = await importFresh('api/client-config.js');
+
+  await withEnv({
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_example',
+    SESSION_SECRET: 'super-secret-session-value'
+  }, async () => {
+    const req = { method: 'GET' };
+    const res = makeRes();
+
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(Object.keys(res.body).sort(), ['SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_URL']);
+    assert.ok(!('SESSION_SECRET' in res.body));
+  });
 });
 
 test('api/client-config.js returns only the required browser config values', async () => {

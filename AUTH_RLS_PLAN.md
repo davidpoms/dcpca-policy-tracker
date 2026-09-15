@@ -4,6 +4,8 @@
 
 This application is currently split between a browser-only shared-password gate and a browser-connected Supabase client that accesses database tables directly with the Supabase publishable/anon key.
 
+Phase 1 change: a real server-side session boundary is now in place for the staff login flow. This does not yet secure direct browser Supabase access; it only ensures the browser must have a valid signed HttpOnly cookie before the app is treated as authenticated at the app layer.
+
 Current flow:
 
 1. The browser loads [index.html](index.html).
@@ -314,7 +316,17 @@ The key principle is: the browser should not directly mutate the application sta
 
 ## 6. Proposed phased PR-sized implementation sequence with rollback points
 
-### PR 1 — Session boundary and API read/write split (no UX rewrite)
+### PR 1 — Session boundary and API read/write split (no UX rewrite) — implemented in this phase
+
+This phase provides the server-validated shared-team session foundation:
+- `SESSION_SECRET` signs the session cookie
+- `/api/check-password` sets the signed HttpOnly cookie
+- `/api/session` validates the cookie and returns 200/401
+- `/api/logout` clears the cookie
+- the frontend checks `/api/session` before rendering the authenticated app
+- no browser storage is used for authentication state
+
+This change does not secure the browser's direct Supabase access. It is intentionally limited to the login/session boundary and does not yet move database access behind server-side APIs or change RLS.
 
 Scope:
 - add a server-side session validation route or helper

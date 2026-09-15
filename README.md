@@ -120,6 +120,7 @@ Set all of these in Vercel under **Settings → Environment Variables**.
 | `SUPABASE_SERVICE_KEY` | ✅ | Supabase service role key — server-side API functions only, never sent to the browser |
 | `CRON_SECRET` | ✅ | Strong passphrase authorizing cron and utility API calls |
 | `APP_PASSWORD` | ✅ | Shared password staff use to access the tracker app |
+| `SESSION_SECRET` | ✅ | Dedicated server-side secret for signed cookie sessions; never exposed to the browser |
 | `GMAIL_USER` | ✅ | Gmail address used to send reports |
 | `GMAIL_APP_PASSWORD` | ✅ | 16-character Gmail app password ([generate here](https://myaccount.google.com/apppasswords)) |
 | `DAILY_REPORT_TO` | ✅ | Recipient email(s) for daily and EOD reports (comma-separated) |
@@ -134,9 +135,11 @@ Set all of these in Vercel under **Settings → Environment Variables**.
 
 ### How it works
 
-**Password gate** — the app requires a shared password before rendering anything. `/api/check-password` validates the password against `APP_PASSWORD` and issues a signed 8-hour session token stored in `sessionStorage`. Sessions expire automatically when the browser tab closes or after 8 hours.
+**Password gate** — the app requires a shared password before rendering anything. `/api/check-password` validates the password against `APP_PASSWORD`, then issues a signed 8-hour server-side session cookie. The browser checks `/api/session` on startup and no session token is stored in browser storage. This is Phase 1 of the auth boundary improvement; it does not secure browser-side Supabase access yet.
 
-**Row Level Security (RLS)** — `rls_migration.sql` enables Supabase RLS on all tables and grants the anon key (used in the browser) only the specific operations each table needs. Server-side-only tables (`lims_cache_cursor`, `keyword_alert_log`) have no anon policies at all — the browser cannot touch them. `lims_bill_cache` is read-only from the browser. Anyone who extracts the anon key from DevTools can only perform the same operations as a logged-in user.
+**Session foundation** — `SESSION_SECRET` is a dedicated server-only signing secret used for signed cookie sessions. It is never exposed to the browser, must be distinct from `APP_PASSWORD`, `CRON_SECRET`, and `SUPABASE_SERVICE_KEY`, and is used only for the cookie/session validation layer.
+
+**Row Level Security (RLS)** — `rls_migration.sql` enables Supabase RLS on all tables and grants the anon key (used in the browser) only the specific operations each table needs. Server-side-only tables (`lims_cache_cursor`, `keyword_alert_log`) have no anon policies at all — the browser cannot touch them. `lims_bill_cache` is read-only from the browser. This remains unchanged by Phase 1; browser Supabase direct access is not yet secured by the cookie session.
 
 **Service role key is server-side only** — `SUPABASE_SERVICE_KEY` exists only in Vercel environment variables and is used exclusively in API functions. It never reaches the browser.
 

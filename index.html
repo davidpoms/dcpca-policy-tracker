@@ -224,17 +224,29 @@
 
         function DCPolicyTracker() {
             // ─── Password gate ────────────────────────────────────────────────────────────
-            const [authenticated, setAuthenticated] = useState(() => {
-                try {
-                    const stored = sessionStorage.getItem('dc_tracker_session');
-                    if (!stored) return false;
-                    const { token, expires } = JSON.parse(stored);
-                    return token && expires && Date.now() < expires;
-                } catch { return false; }
-            });
+            const [authenticated, setAuthenticated] = useState(false);
             const [passwordInput, setPasswordInput] = useState('');
             const [passwordError, setPasswordError] = useState('');
             const [passwordLoading, setPasswordLoading] = useState(false);
+
+            const checkSession = async () => {
+                try {
+                    const res = await fetch('/api/session', { credentials: 'same-origin' });
+                    if (!res.ok) {
+                        setAuthenticated(false);
+                        return;
+                    }
+
+                    const data = await res.json();
+                    setAuthenticated(Boolean(data && data.valid));
+                } catch {
+                    setAuthenticated(false);
+                }
+            };
+
+            useEffect(() => {
+                checkSession();
+            }, []);
 
             const handleLogin = async (e) => {
                 e.preventDefault();
@@ -244,16 +256,28 @@
                     const res = await fetch('/api/check-password', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ password: passwordInput })
+                        body: JSON.stringify({ password: passwordInput }),
+                        credentials: 'same-origin'
                     });
                     const data = await res.json();
                     if (!res.ok) { setPasswordError('Incorrect password. Please try again.'); return; }
-                    sessionStorage.setItem('dc_tracker_session', JSON.stringify({ token: data.token, expires: data.expires }));
+                    await checkSession();
                     setAuthenticated(true);
                 } catch {
                     setPasswordError('Could not reach the server. Please try again.');
                 } finally {
                     setPasswordLoading(false);
+                }
+            };
+
+            const handleLogout = async () => {
+                try {
+                    await fetch('/api/logout', {
+                        method: 'POST',
+                        credentials: 'same-origin'
+                    });
+                } finally {
+                    setAuthenticated(false);
                 }
             };
 
@@ -1463,6 +1487,7 @@
                                     <p className="text-gray-600">Legislative Monitoring System</p>
                                 </div>
                                 <div className="flex gap-2 flex-wrap">
+                                    <button onClick={handleLogout} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">Log Out</button>
                                     <button onClick={() => setShowTeamManagement(true)} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700">👥 Manage Team</button>
                                     <button
                                         onClick={checkHearingsForTrackedItems}
