@@ -1,0 +1,487 @@
+# Phase 2A API Map
+
+## Scope and constraints
+
+This document is a design map for a future consolidated authenticated application API route:
+
+  /api/app-data.js
+
+This is not implemented in this task. It is a strict implementation plan for the next migration slice.
+
+The route must:
+- validate the server-side HTTP-only session cookie via the existing helper in lib/session.js
+- use SUPABASE_SERVICE_KEY only server-side
+- reject unauthenticated requests with 401
+- never accept a table name from the browser
+- never accept arbitrary Supabase filters from the browser
+- never expose SUPABASE_SERVICE_KEY to the browser or the response body
+- use a strict action allow-list
+- preserve current application behavior until each action is migrated
+
+## Session/auth model
+
+The future route follows the existing app contract:
+- Browser sends the HttpOnly cookie named `dc_tracker_session`
+- Server reads the cookie through `getSessionCookieValue(req)`
+- Server validates the signed session via `validateSignedSession(rawValue)`
+- If invalid or missing, return `401` with a generic error
+- For all app-data actions, use the service-role key to perform writes, not the anon key
+
+Pseudo-flow:
+
+```js
+import { getSessionCookieValue, validateSignedSession } from '../lib/session.js';
+
+const sessionCookie = getSessionCookieValue(req);
+const sessionResult = validateSignedSession(sessionCookie);
+if (!sessionResult.valid) {
+  return res.status(401).json({ error: 'Unauthorized' });
+}
+```
+
+## Future action allow-list
+
+Each action is explicit and validated. The route should reject unknown actions with `400`.
+
+### trackedItem.create
+- Request body contract
+  - `{ action: 'trackedItem.create', item: { ... } }`
+- Allowed fields
+  - `id`
+  - `title`
+  - `bill_number`
+  - `category`
+  - `status`
+  - `committees`
+  - `date`
+  - `description`
+  - `link`
+  - `source`
+  - `agency`
+  - `is_manual_entry`
+  - `is_new`
+  - `assigned_to`
+  - `priority`
+  - `action_status`
+  - `introduced_by`
+  - `last_status`
+  - `last_checked_at`
+  - `has_new_activity`
+  - `notice_id`
+  - `register_issue`
+  - `register_notes`
+  - `deadline`
+- Required identifiers
+  - `id` required
+  - `title` required
+- Server-side validation
+  - ensure action name is exact
+  - reject unknown fields
+  - ensure `id` is present and not empty
+  - ensure `title` is a string
+  - optionally enforce `source` in current set (`DC Council`, `Municipal Register`)
+- Supabase operation(s)
+  - `insert` into `tracked_items`
+- Expected response contract
+  - `{ ok: true, itemId: '...' }`
+- Related audit/history side effects
+  - append `activity_log` entry for `item_tracked`
+  - no bill history row unless the UI explicitly triggers a status-change event
+- Existing frontend functions that would switch to this action
+  - `toggleSelection()` when selecting an item to track
+  - `addManualEntry()` when creating a manual entry
+
+### trackedItem.update
+- Request body contract
+  - `{ action: 'trackedItem.update', itemId: '...', changes: { ... } }`
+- Allowed fields
+  - `title`
+  - `agency`
+  - `status`
+  - `date`
+  - `description`
+  - `link`
+  - `assigned_to`
+  - `priority`
+  - `action_status`
+  - `manual_summary`
+  - `last_status`
+  - `has_new_activity`
+  - `activity_summary`
+  - `last_checked_at`
+  - `hearing_checked_at`
+  - `next_hearing_date`
+  - `hearing_type`
+  - `hearing_location`
+  - `additional_information`
+  - `committee_re_referral`
+  - `latest_activity_date`
+  - `latest_activity_label`
+  - `activity_count`
+  - `activity_timeline`
+  - `introduced_by`
+  - `co_introducers`
+  - `notice_id`
+  - `register_issue`
+  - `register_notes`
+  - `deadline`
+- Required identifiers
+  - `itemId` required
+  - `changes` object required
+- Server-side validation
+  - validate `itemId`
+  - allow only explicit fields
+  - reject unknown or nested object fields
+  - if `action_status` changes, record the status-change audit side effect via `bill_status_history`
+- Supabase operation(s)
+  - `update` on `tracked_items` with `.eq('id', itemId)`
+  - optional `insert` into `bill_status_history` when `action_status` changes
+- Expected response contract
+  - `{ ok: true, itemId: '...' }`
+- Related audit/history side effects
+  - `bill_status_history` insert when action status changes
+  - `activity_log` insert for `assigned`, `priority_changed`, `action_status_changed`, or `activity_detected`
+- Existing frontend functions that would switch to this action
+  - `updateAssignment()`
+  - `updatePriority()`
+  - `updateActionStatus()`
+  - `saveSummary()`
+  - `deleteManualSummary()`
+  - `updateManualEntry()`
+  - `updateItemActivity()`
+  - `markActivityAsSeen()`
+  - `checkHearingForItem()`
+  - `checkHearingsForTrackedItems()`
+
+### trackedItem.delete
+- Request body contract
+  - `{ action: 'trackedItem.delete', itemId: '...' }`
+- Allowed fields
+  - none beyond `itemId`
+- Required identifiers
+  - `itemId` required
+- Server-side validation
+  - validate `itemId`
+- Supabase operation(s)
+  - `delete` from `tracked_items` with `.eq('id', itemId)`
+- Expected response contract
+  - `{ ok: true, itemId: '...' }`
+- Related audit/history side effects
+  - `activity_log` insert for `item_untracked`
+- Existing frontend functions that would switch to this action
+  - `toggleSelection()` when untracking an item
+  - `deleteManualEntry()`
+
+### note.create
+- Request body contract
+  - `{ action: 'note.create', itemId: '...', noteText: '...' }`
+- Allowed fields
+  - `itemId`
+  - `noteText`
+- Required identifiers
+  - `itemId` required
+  - `noteText` required
+- Server-side validation
+  - reject empty `noteText` after trim
+  - validate `itemId`
+- Supabase operation(s)
+  - `upsert` into `item_notes` on `item_id`
+- Expected response contract
+  - `{ ok: true, itemId: '...' }`
+- Related audit/history side effects
+  - `activity_log` insert for `note_added`
+- Existing frontend functions that would switch to this action
+  - `saveNote()` in the add/edit note flow
+
+### note.update
+- Request body contract
+  - `{ action: 'note.update', itemId: '...', noteText: '...' }`
+- Allowed fields
+  - same as `note.create`
+- Required identifiers
+  - `itemId` required
+- Server-side validation
+  - same as `note.create`
+- Supabase operation(s)
+  - `upsert` into `item_notes`
+- Expected response contract
+  - `{ ok: true, itemId: '...' }`
+- Related audit/history side effects
+  - `activity_log` insert for `note_updated`
+- Existing frontend functions that would switch to this action
+  - `saveNote()` when an existing note is being replaced
+
+### note.delete
+- Request body contract
+  - `{ action: 'note.delete', itemId: '...' }`
+- Allowed fields
+  - `itemId`
+- Required identifiers
+  - `itemId` required
+- Supabase operation(s)
+  - `delete` from `item_notes` with `.eq('item_id', itemId)`
+- Expected response contract
+  - `{ ok: true, itemId: '...' }`
+- Related audit/history side effects
+  - `activity_log` insert for `note_deleted`
+- Existing frontend functions that would switch to this action
+  - `deleteNote()`
+
+### keyword.add
+- Request body contract
+  - `{ action: 'keyword.add', keywords: ['keyword1', 'keyword2'] }`
+- Allowed fields
+  - `keywords` array of strings
+- Required identifiers
+  - array length > 0
+- Server-side validation
+  - reject empty values
+  - lowercase/trim on server if that matches current app behavior
+  - reject duplicates by checking existing values or by deduplicating server-side
+- Supabase operation(s)
+  - `insert` into `tracked_keywords`
+- Expected response contract
+  - `{ ok: true, added: ['...'] }`
+- Related audit/history side effects
+  - `activity_log` insert for `keyword_added`
+- Existing frontend functions that would switch to this action
+  - `addKeyword()`
+
+### keyword.remove
+- Request body contract
+  - `{ action: 'keyword.remove', keyword: '...' }`
+- Allowed fields
+  - `keyword`
+- Required identifiers
+  - `keyword` required
+- Supabase operation(s)
+  - `delete` from `tracked_keywords` with `.eq('keyword', keyword)`
+- Expected response contract
+  - `{ ok: true, keyword: '...' }`
+- Related audit/history side effects
+  - `activity_log` insert for `keyword_removed`
+- Existing frontend functions that would switch to this action
+  - `removeKeyword()`
+
+### committee.add
+- Request body contract
+  - `{ action: 'committee.add', committeeName: '...' }`
+- Allowed fields
+  - `committeeName`
+- Required identifiers
+  - `committeeName` required
+- Supabase operation(s)
+  - `insert` into `tracked_committees`
+- Expected response contract
+  - `{ ok: true, committeeName: '...' }`
+- Related audit/history side effects
+  - `activity_log` insert for `committee_added`
+- Existing frontend functions that would switch to this action
+  - `addCommittee()`
+
+### committee.remove
+- Request body contract
+  - `{ action: 'committee.remove', committeeName: '...' }`
+- Allowed fields
+  - `committeeName`
+- Supabase operation(s)
+  - `delete` from `tracked_committees` with `.eq('committee_name', committeeName)`
+- Expected response contract
+  - `{ ok: true, committeeName: '...' }`
+- Related audit/history side effects
+  - `activity_log` insert for `committee_removed`
+- Existing frontend functions that would switch to this action
+  - `removeCommittee()`
+
+### sponsor.add
+- Request body contract
+  - `{ action: 'sponsor.add', sponsorName: '...' }`
+- Allowed fields
+  - `sponsorName`
+- Required identifiers
+  - `sponsorName` required
+- Supabase operation(s)
+  - `insert` into `tracked_sponsors`
+- Expected response contract
+  - `{ ok: true, sponsorName: '...' }`
+- Related audit/history side effects
+  - `activity_log` insert for `sponsor_added`
+- Existing frontend functions that would switch to this action
+  - `addSponsor()`
+
+### sponsor.remove
+- Request body contract
+  - `{ action: 'sponsor.remove', sponsorName: '...' }`
+- Allowed fields
+  - `sponsorName`
+- Supabase operation(s)
+  - `delete` from `tracked_sponsors` with `.eq('sponsor_name', sponsorName)`
+- Expected response contract
+  - `{ ok: true, sponsorName: '...' }`
+- Related audit/history side effects
+  - `activity_log` insert for `sponsor_removed`
+- Existing frontend functions that would switch to this action
+  - `removeSponsor()`
+
+### agency.add
+- Request body contract
+  - `{ action: 'agency.add', agencyName: '...' }`
+- Allowed fields
+  - `agencyName`
+- Required identifiers
+  - `agencyName` required
+- Supabase operation(s)
+  - `insert` into `tracked_agencies`
+- Expected response contract
+  - `{ ok: true, agencyName: '...' }`
+- Related audit/history side effects
+  - none beyond local tracking change
+- Existing frontend functions that would switch to this action
+  - `addAgency()`
+
+### agency.remove
+- Request body contract
+  - `{ action: 'agency.remove', agencyName: '...' }`
+- Allowed fields
+  - `agencyName`
+- Supabase operation(s)
+  - `delete` from `tracked_agencies` with `.eq('agency_name', agencyName)`
+- Expected response contract
+  - `{ ok: true, agencyName: '...' }`
+- Related audit/history side effects
+  - none beyond local tracking change
+- Existing frontend functions that would switch to this action
+  - `removeAgency()`
+
+### teamMember.create
+- Request body contract
+  - `{ action: 'teamMember.create', name: '...', email: '...' }`
+- Allowed fields
+  - `name`
+  - `email`
+- Required identifiers
+  - `name` required
+- Server-side validation
+  - normalise strings
+  - `email` optional but if present must be string
+- Supabase operation(s)
+  - `insert` into `team_members`
+- Expected response contract
+  - `{ ok: true, teamMember: { ... } }`
+- Related audit/history side effects
+  - `activity_log` insert for `team_member_added`
+- Existing frontend functions that would switch to this action
+  - `addTeamMember()`
+
+### teamMember.update
+- Request body contract
+  - `{ action: 'teamMember.update', teamMemberId: '...', name: '...', email: '...' }`
+- Allowed fields
+  - `teamMemberId`
+  - `name`
+  - `email`
+- Required identifiers
+  - `teamMemberId` required
+  - `name` required
+- Server-side validation
+  - validate `teamMemberId`
+  - if name changes, also update `tracked_items.assigned_to` values for the old name in a controlled batch update
+- Supabase operation(s)
+  - `update` on `team_members` with `.eq('id', teamMemberId)`
+  - optional `update` on `tracked_items` with `.eq('assigned_to', oldName)`
+- Expected response contract
+  - `{ ok: true, teamMemberId: '...' }`
+- Related audit/history side effects
+  - `activity_log` insert for `team_member_updated`
+- Existing frontend functions that would switch to this action
+  - `updateTeamMember()`
+
+### teamMember.delete
+- Request body contract
+  - `{ action: 'teamMember.delete', teamMemberId: '...' }`
+- Allowed fields
+  - `teamMemberId`
+- Required identifiers
+  - `teamMemberId` required
+- Supabase operation(s)
+  - `update` on `team_members` setting `active = false`
+- Expected response contract
+  - `{ ok: true, teamMemberId: '...' }`
+- Related audit/history side effects
+  - `activity_log` insert for `team_member_deleted`
+- Existing frontend functions that would switch to this action
+  - `deleteTeamMember()`
+
+## Recommended first migration slice
+
+Recommended first migration slice: `keyword.add`, `keyword.remove`, `committee.add`, `committee.remove`, `sponsor.add`, `sponsor.remove`, `agency.add`, `agency.remove`.
+
+Why this group first:
+- it is a coherent, small UI surface with low blast radius
+- it changes tracking configuration rather than core item state
+- it is easy to test with direct table inserts/deletes and explicit audit log writes
+- it reduces raw browser write access without immediately coupling multiple item-level history writes
+- it avoids the largest coupled sequence in the app: `tracked_items` updates plus `bill_status_history` and `activity_log` inflight writes
+
+This is better than starting with `tracked_items` because many tracked-item actions trigger multiple coupled writes in the same user action and can produce side effects such as `bill_status_history` inserts, `activity_log` inserts, and UI-refresh dependencies that are harder to isolate and verify safely.
+
+## Tests required for the future /api/app-data.js route
+
+Required tests:
+1. missing session cookie -> `401`
+2. tampered/expired/invalid session -> `401`
+3. unknown action -> `400`
+4. missing required fields -> `400`
+5. disallowed extra fields are rejected or ignored explicitly
+6. successful action calls only the intended Supabase operation(s)
+7. service-role secret is never returned in the response
+8. current direct-browser mutation remains in place until each specific action is migrated
+9. the API function count remains `<= 12` after the route is added and other route removals are preserved
+
+Suggested test patterns:
+- use a mocked Supabase client or stubbed server-side helper injection
+- assert exact `insert`/`update`/`delete` calls for each action
+- assert no table name or filter comes from request body
+- assert validation errors are generic and consistent
+- assert the response for a success does not contain `SUPABASE_SERVICE_KEY`
+
+## Current direct browser mutation inventory
+
+The current browser code in index.html performs direct Supabase writes to the following tables:
+
+- `tracked_items` — INSERT, UPDATE, DELETE
+- `item_notes` — UPSERT, DELETE
+- `bill_status_history` — INSERT
+- `activity_log` — INSERT
+- `team_members` — UPDATE, INSERT, DELETE via update(active=false)
+- `tracked_keywords` — INSERT, DELETE
+- `tracked_committees` — INSERT, DELETE
+- `tracked_sponsors` — INSERT, DELETE
+- `tracked_agencies` — INSERT, DELETE
+
+This is a total of 16 table-operation combinations in direct browser writes, with more coupled multi-write user actions around tracked item and hearing status updates.
+
+## More coupled / complex sequences than expected
+
+The most coupled and complex sequences are:
+- `checkHearingsForTrackedItems()` and `checkHearingForItem()`
+  - update `tracked_items`
+  - sometimes write `bill_status_history`
+  - may update `activity_log`
+  - refresh local UI state after the same operation
+- `updateActionStatus()`
+  - updates `tracked_items`
+  - immediately inserts into `bill_status_history`
+  - logs the action in `activity_log`
+- `toggleSelection()`
+  - inserts or deletes `tracked_items`
+  - logs to `activity_log`
+- `addTeamMember()` and `updateTeamMember()`
+  - insert/update team members
+  - then may update `tracked_items.assigned_to` values as a secondary write
+
+These are not simple single-table mutations and are the reason the implementation should migrate a small configuration-style slice first rather than the immediate migration of the broadest item-tracking workflow.
+
+## Summary
+
+The future route should be strict, action-based, and tied to existing server-side session validation. The best first slice is the tracking configuration tables (keywords/committees/sponsors/agencies) because they are small, coherent, and less entangled with status-history writing than `tracked_items` operations.

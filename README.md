@@ -42,8 +42,7 @@ A self-hosted web application for tracking DC Council legislation and DC Registe
 │   ├── send-daily-report.js        # Cron: morning email report (Mon–Fri 8:30am ET)
 │   ├── send-eod-report.js          # Cron: end-of-day report if any updates (Mon–Fri 5pm ET)
 │   ├── send-weekly-report.js       # Cron: weekly summary (Monday 5pm ET)
-│   ├── build-bill-cache.js         # Cron + manual: builds LIMS bill cache for search
-│   └── test-mail.js                # Local mail smoke test (not a production route contract)
+│   └── build-bill-cache.js         # Cron + manual: builds LIMS bill cache for search
 ├── lib/
 │   ├── session.js                  # Shared signed-cookie session helpers
 │   └── mailer.js                   # Shared email helper

@@ -248,13 +248,13 @@ The following checks were verified against the current branch state rather than 
 - Smallest reasonable remediation: Remove it if no longer needed or gate it to local-only use with a clear “do not deploy” annotation.
 - Regression tests that should exist before changing it: a deploy guard that fails if one-off scripts remain in the default route set.
 
-### Finding 11.2 — `test-mail.js` remains a utility script and is not clearly local-only
-- Status: OPEN
+### Finding 11.2 — Test mail helper has been removed from the deployable route set
+- Status: RESOLVED
 - Severity: Low
-- Relevant files: [api/test-mail.js](api/test-mail.js)
-- Why it matters: It is valuable for debugging but should not be part of a production route contract or a default deployment scenario.
-- Smallest reasonable remediation: Mark it local-only or move it outside the route set.
-- Regression tests that should exist before changing it: route-set validation ensuring only intended production handlers are deployed.
+- Relevant files: [lib/mailer.js](lib/mailer.js), [README.md](README.md)
+- Why it matters: A one-off smoke test route was a legacy dev utility and was not part of the production workflow. Keeping it in the route set consumes a Vercel function slot without adding runtime value.
+- Smallest reasonable remediation: Keep the mail helper in /lib and remove the route entirely from deployable functions.
+- Regression tests that should exist before changing it: route-set validation ensuring only intended production handlers remain in /api.
 
 ---
 
