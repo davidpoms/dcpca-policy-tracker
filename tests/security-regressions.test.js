@@ -249,16 +249,18 @@ test('api/session.js validates real sessions and rejects missing or invalid ones
 });
 
 test('api/check-password.js returns 500 when SESSION_SECRET is missing', async () => {
-  const handler = await importFresh('api/check-password.js', {
-    APP_PASSWORD: 'correct-password',
-    SESSION_SECRET: undefined,
-    CRON_SECRET: 'cron-secret-value'
-  });
+  const handler = await importFresh('api/check-password.js');
 
   const req = { method: 'POST', body: { password: 'correct-password' } };
   const res = makeRes();
 
-  await handler(req, res);
+  await withEnv({
+    APP_PASSWORD: 'correct-password',
+    SESSION_SECRET: undefined,
+    CRON_SECRET: 'cron-secret-value'
+  }, async () => {
+    await handler(req, res);
+  });
 
   assert.equal(res.statusCode, 500);
   assert.equal(res.body.error, 'Session configuration unavailable');
