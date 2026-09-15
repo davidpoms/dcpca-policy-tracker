@@ -2,11 +2,11 @@
 
 ## Scope and constraints
 
-This document is a design map for a future consolidated authenticated application API route:
+This document describes the consolidated authenticated application API route:
 
   /api/app-data.js
 
-This is not implemented in this task. It is a strict implementation plan for the next migration slice.
+The first migration slice is implemented for the eight low-risk tracked config-table actions. The route continues to preserve the current application behavior while moving those writes behind the server-side session check. RLS has not yet been tightened for the browser path; anonymous direct Supabase writes remain possible until the next authorization phase.
 
 The route must:
 - validate the server-side HTTP-only session cookie via the existing helper in lib/session.js
@@ -228,6 +228,7 @@ Each action is explicit and validated. The route should reject unknown actions w
   - `deleteNote()`
 
 ### keyword.add
+- Status: IMPLEMENTED
 - Request body contract
   - `{ action: 'keyword.add', keywords: ['keyword1', 'keyword2'] }`
 - Allowed fields
@@ -243,11 +244,12 @@ Each action is explicit and validated. The route should reject unknown actions w
 - Expected response contract
   - `{ ok: true, added: ['...'] }`
 - Related audit/history side effects
-  - `activity_log` insert for `keyword_added`
+  - `activity_log` insert for `keyword_added` with details `{ keywords: 'keyword1, keyword2' }`
 - Existing frontend functions that would switch to this action
   - `addKeyword()`
 
 ### keyword.remove
+- Status: IMPLEMENTED
 - Request body contract
   - `{ action: 'keyword.remove', keyword: '...' }`
 - Allowed fields
@@ -259,11 +261,12 @@ Each action is explicit and validated. The route should reject unknown actions w
 - Expected response contract
   - `{ ok: true, keyword: '...' }`
 - Related audit/history side effects
-  - `activity_log` insert for `keyword_removed`
+  - `activity_log` insert for `keyword_removed` with details `{ keyword: '...' }`
 - Existing frontend functions that would switch to this action
   - `removeKeyword()`
 
 ### committee.add
+- Status: IMPLEMENTED
 - Request body contract
   - `{ action: 'committee.add', committeeName: '...' }`
 - Allowed fields
@@ -275,11 +278,12 @@ Each action is explicit and validated. The route should reject unknown actions w
 - Expected response contract
   - `{ ok: true, committeeName: '...' }`
 - Related audit/history side effects
-  - `activity_log` insert for `committee_added`
+  - `activity_log` insert for `committee_added` with details `{ committee: '...' }`
 - Existing frontend functions that would switch to this action
   - `addCommittee()`
 
 ### committee.remove
+- Status: IMPLEMENTED
 - Request body contract
   - `{ action: 'committee.remove', committeeName: '...' }`
 - Allowed fields
@@ -289,11 +293,12 @@ Each action is explicit and validated. The route should reject unknown actions w
 - Expected response contract
   - `{ ok: true, committeeName: '...' }`
 - Related audit/history side effects
-  - `activity_log` insert for `committee_removed`
+  - `activity_log` insert for `committee_removed` with details `{ committee: '...' }`
 - Existing frontend functions that would switch to this action
   - `removeCommittee()`
 
 ### sponsor.add
+- Status: IMPLEMENTED
 - Request body contract
   - `{ action: 'sponsor.add', sponsorName: '...' }`
 - Allowed fields
@@ -305,11 +310,12 @@ Each action is explicit and validated. The route should reject unknown actions w
 - Expected response contract
   - `{ ok: true, sponsorName: '...' }`
 - Related audit/history side effects
-  - `activity_log` insert for `sponsor_added`
+  - `activity_log` insert for `sponsor_added` with details `{ sponsor: '...' }`
 - Existing frontend functions that would switch to this action
   - `addSponsor()`
 
 ### sponsor.remove
+- Status: IMPLEMENTED
 - Request body contract
   - `{ action: 'sponsor.remove', sponsorName: '...' }`
 - Allowed fields
@@ -319,11 +325,12 @@ Each action is explicit and validated. The route should reject unknown actions w
 - Expected response contract
   - `{ ok: true, sponsorName: '...' }`
 - Related audit/history side effects
-  - `activity_log` insert for `sponsor_removed`
+  - `activity_log` insert for `sponsor_removed` with details `{ sponsor: '...' }`
 - Existing frontend functions that would switch to this action
   - `removeSponsor()`
 
 ### agency.add
+- Status: IMPLEMENTED
 - Request body contract
   - `{ action: 'agency.add', agencyName: '...' }`
 - Allowed fields
@@ -335,11 +342,12 @@ Each action is explicit and validated. The route should reject unknown actions w
 - Expected response contract
   - `{ ok: true, agencyName: '...' }`
 - Related audit/history side effects
-  - none beyond local tracking change
+  - no `activity_log` entry
 - Existing frontend functions that would switch to this action
   - `addAgency()`
 
 ### agency.remove
+- Status: IMPLEMENTED
 - Request body contract
   - `{ action: 'agency.remove', agencyName: '...' }`
 - Allowed fields
@@ -349,7 +357,7 @@ Each action is explicit and validated. The route should reject unknown actions w
 - Expected response contract
   - `{ ok: true, agencyName: '...' }`
 - Related audit/history side effects
-  - none beyond local tracking change
+  - no `activity_log` entry
 - Existing frontend functions that would switch to this action
   - `removeAgency()`
 
@@ -414,7 +422,9 @@ Each action is explicit and validated. The route should reject unknown actions w
 
 ## Recommended first migration slice
 
-Recommended first migration slice: `keyword.add`, `keyword.remove`, `committee.add`, `committee.remove`, `sponsor.add`, `sponsor.remove`, `agency.add`, `agency.remove`.
+Implemented first migration slice: `keyword.add`, `keyword.remove`, `committee.add`, `committee.remove`, `sponsor.add`, `sponsor.remove`, `agency.add`, `agency.remove`.
+
+The six keyword/committee/sponsor actions log to `activity_log` using the same action names and row structure as the previous browser-side implementation. Agency add/remove intentionally do not log. This implementation does not yet tighten RLS; browser direct writes remain possible until the authorization phase after this slice.
 
 Why this group first:
 - it is a coherent, small UI surface with low blast radius

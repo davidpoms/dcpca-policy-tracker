@@ -1076,60 +1076,90 @@
                 const incoming = newKeyword.split(',').map(k => k.trim().toLowerCase()).filter(k => k && !trackedKeywords.includes(k));
                 if (!incoming.length) { setNewKeyword(''); setShowAddKeyword(false); return; }
                 try {
-                    const { error } = await supabase.from('tracked_keywords').insert(incoming.map(k => ({ keyword: k })));
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'keyword.add', keywords: incoming })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to add keywords');
                     setTrackedKeywords([...trackedKeywords, ...incoming]);
                     setNewKeyword(''); setShowAddKeyword(false);
-                    await logActivity('keyword_added', null, null, { keywords: incoming.join(', ') });
                 } catch (err) { setError('Failed to add keywords: ' + err.message); }
             };
 
             const removeKeyword = async (keyword) => {
                 try {
-                    const { error } = await supabase.from('tracked_keywords').delete().eq('keyword', keyword);
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'keyword.remove', keyword })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to remove keyword');
                     setTrackedKeywords(trackedKeywords.filter(k => k !== keyword));
-                    await logActivity('keyword_removed', null, null, { keyword });
                 } catch (err) { setError('Failed to remove keyword: ' + err.message); }
             };
 
             const addCommittee = async () => {
                 if (!newCommittee.trim() || trackedCommittees.includes(newCommittee)) return;
                 try {
-                    const { error } = await supabase.from('tracked_committees').insert({ committee_name: newCommittee });
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'committee.add', committeeName: newCommittee })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to add committee');
                     setTrackedCommittees([...trackedCommittees, newCommittee]);
                     setNewCommittee(''); setShowAddCommittee(false);
-                    await logActivity('committee_added', null, null, { committee: newCommittee });
                 } catch (err) { setError('Failed to add committee: ' + err.message); }
             };
 
             const removeCommittee = async (committee) => {
                 try {
-                    const { error } = await supabase.from('tracked_committees').delete().eq('committee_name', committee);
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'committee.remove', committeeName: committee })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to remove committee');
                     setTrackedCommittees(trackedCommittees.filter(c => c !== committee));
-                    await logActivity('committee_removed', null, null, { committee });
                 } catch (err) { setError('Failed to remove committee: ' + err.message); }
             };
 
             const addSponsor = async () => {
                 if (!newSponsor.trim() || trackedSponsors.includes(newSponsor)) return;
                 try {
-                    const { error } = await supabase.from('tracked_sponsors').insert({ sponsor_name: newSponsor });
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'sponsor.add', sponsorName: newSponsor })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to add sponsor');
                     setTrackedSponsors([...trackedSponsors, newSponsor]);
                     setNewSponsor(''); setShowAddSponsor(false);
-                    await logActivity('sponsor_added', null, null, { sponsor: newSponsor });
                 } catch (err) { setError('Failed to add sponsor: ' + err.message); }
             };
 
             const removeSponsor = async (sponsor) => {
                 try {
-                    const { error } = await supabase.from('tracked_sponsors').delete().eq('sponsor_name', sponsor);
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'sponsor.remove', sponsorName: sponsor })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to remove sponsor');
                     setTrackedSponsors(trackedSponsors.filter(s => s !== sponsor));
-                    await logActivity('sponsor_removed', null, null, { sponsor });
                 } catch (err) { setError('Failed to remove sponsor: ' + err.message); }
             };
 
@@ -1137,16 +1167,28 @@
                 const trimmed = name.trim();
                 if (!trimmed || trackedAgencies.includes(trimmed)) return;
                 try {
-                    const { error } = await supabase.from('tracked_agencies').insert({ agency_name: trimmed });
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'agency.add', agencyName: trimmed })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to add agency');
                     setTrackedAgencies([...trackedAgencies, trimmed].sort());
                 } catch (err) { setError('Failed to add agency: ' + err.message); }
             };
 
             const removeAgency = async (name) => {
                 try {
-                    const { error } = await supabase.from('tracked_agencies').delete().eq('agency_name', name);
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'agency.remove', agencyName: name })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to remove agency');
                     setTrackedAgencies(trackedAgencies.filter(a => a !== name));
                 } catch (err) { setError('Failed to remove agency: ' + err.message); }
             };

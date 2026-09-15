@@ -91,6 +91,7 @@ The following checks were verified against the current branch state rather than 
 - Why it matters: The current RLS model grants anonymous clients SELECT/INSERT/UPDATE/DELETE access to a large set of tables: `tracked_items`, `item_notes`, `bill_status_history`, `tracked_keywords`, `tracked_committees`, `tracked_sponsors`, `tracked_agencies`, `team_members`, `activity_log`, and `lims_bill_cache` read access. A caller with the browser publishable key can perform those operations if the application allows it, subject to the table policies. The browser login is not a database auth boundary; the anon key is.
 - Smallest reasonable remediation: Reduce anon permissions to the minimum required for the product’s actual browser workflow, and move sensitive writes to server-side endpoints where possible.
 - Regression tests that should exist before changing it: RLS policy tests covering read/write limits for anon users and verifying that server-only tables remain inaccessible.
+- Current branch note: The first authenticated API slice in [api/app-data.js](api/app-data.js) now covers the low-risk config-table writes (`tracked_keywords`, `tracked_committees`, `tracked_sponsors`, and `tracked_agencies`) behind a server-side session check, but anonymous direct Supabase writes remain possible until the next RLS phase and the rest of the browser mutation surface is migrated.
 
 ### Finding 4.2 — There are no foreign-key constraints on history/log rows
 - Status: OPEN
