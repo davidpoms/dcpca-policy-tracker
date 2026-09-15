@@ -197,7 +197,7 @@ test('api/client-config.js fails when required values are absent', async () => {
 });
 
 test('repository guardrails block historical secret and production URL drift', () => {
-  const apiFiles = collectApiFiles();
+  const apiFiles = collectApiFiles().map((file) => `api/${file}`);
   const appFiles = ['index.html', ...apiFiles];
 
   const appText = appFiles.map((relativePath) => readRepoText(relativePath)).join('\n');
@@ -209,7 +209,7 @@ test('repository guardrails block historical secret and production URL drift', (
   assert.doesNotMatch(readRepoText('api/build-bill-cache.js'), /https:\/\/dcpca-policy-tracker\.vercel\.app/i);
 
   for (const relativePath of apiFiles) {
-    const content = readRepoText(`api/${relativePath}`);
+    const content = readRepoText(relativePath);
     assert.doesNotMatch(content, /x-vercel-cron/i);
   }
 });

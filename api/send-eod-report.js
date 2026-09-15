@@ -118,7 +118,6 @@ export default async function handler(req, res) {
         (historyByItem[item.id] || []).some(h => h.change_label && h.change_label.startsWith('Hearing Scheduled'))
     );
 
-    const allItems = await supabaseGet('/tracked_items?select=action_status,next_hearing_date,latest_activity_date,tracked_at,is_manual_entry');
     const actionNeeded = allItems.filter(i => i.action_status === 'action_needed');
     const monitorAndAssess = allItems.filter(i => i.action_status === 'monitor_and_assess');
     const withHearings = allItems.filter(i => i.next_hearing_date && new Date(i.next_hearing_date) >= todayStartDate);
