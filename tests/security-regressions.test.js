@@ -174,16 +174,18 @@ test('api/check-password.js accepts the configured APP_PASSWORD and sets a signe
 });
 
 test('api/check-password.js never returns secret values in the response body', async () => {
-  const handler = await importFresh('api/check-password.js', {
-    APP_PASSWORD: 'correct-password',
-    SESSION_SECRET: 'super-secret-value',
-    CRON_SECRET: 'cron-secret-value'
-  });
+  const handler = await importFresh('api/check-password.js');
 
   const req = { method: 'POST', body: { password: 'correct-password' } };
   const res = makeRes();
 
-  await handler(req, res);
+  await withEnv({
+    APP_PASSWORD: 'correct-password',
+    SESSION_SECRET: 'super-secret-value',
+    CRON_SECRET: 'cron-secret-value'
+  }, async () => {
+    await handler(req, res);
+  });
 
   const responseText = JSON.stringify(res.body);
   assert.doesNotMatch(responseText, /correct-password/i);

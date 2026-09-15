@@ -11,16 +11,16 @@
 
 import { createSignedSession, buildSessionCookie, SESSION_MAX_MS } from './_session.js';
 
-const APP_PASSWORD = process.env.APP_PASSWORD;
-
 export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-store');
 
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-    if (!APP_PASSWORD) return res.status(500).json({ error: 'APP_PASSWORD not configured' });
+
+    const appPassword = process.env.APP_PASSWORD;
+    if (!appPassword) return res.status(500).json({ error: 'APP_PASSWORD not configured' });
 
     const { password } = req.body || {};
-    if (!password || password !== APP_PASSWORD) {
+    if (!password || password !== appPassword) {
         // Small delay to slow brute force attempts
         await new Promise(r => setTimeout(r, 600));
         return res.status(401).json({ error: 'Incorrect password' });
