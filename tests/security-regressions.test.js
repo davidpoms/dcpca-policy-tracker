@@ -267,8 +267,8 @@ test('api/hello.js returns 500 without LIMS_API_KEY and does not fetch upstream'
 
       assert.equal(res.statusCode, 500);
       assert.equal(res.body.error, 'LIMS configuration unavailable');
-      assert.ok(!('LIMS_API_KEY' in res.body));
-      assert.ok(!('Authorization' in JSON.stringify(res.body)));
+      const responseText = JSON.stringify(res.body);
+      assert.doesNotMatch(responseText, /LIMS_API_KEY|Authorization/i);
       assert.equal(fetchCalled, false);
     });
   } finally {
