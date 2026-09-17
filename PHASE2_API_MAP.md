@@ -6,7 +6,7 @@ This document describes the consolidated authenticated application API route:
 
   /api/app-data.js
 
-The first migration slice is implemented for the eight low-risk tracked config-table actions. The route continues to preserve the current application behavior while moving those writes behind the server-side session check. RLS has not yet been tightened for the browser path; anonymous direct Supabase writes remain possible until the next authorization phase.
+The first migration slice is implemented for the eight low-risk tracked config-table actions. The route continues to preserve the current application behavior while moving those writes behind the server-side session check. The four config tables have a versioned RLS migration that preserves anonymous reads and removes anonymous writes. It has been validated in Preview and must be applied separately to Production after Production policy inventory and rollout checks.
 
 The route must:
 - validate the server-side HTTP-only session cookie via the existing helper in lib/session.js
@@ -424,7 +424,45 @@ Each action is explicit and validated. The route should reject unknown actions w
 
 Implemented first migration slice: `keyword.add`, `keyword.remove`, `committee.add`, `committee.remove`, `sponsor.add`, `sponsor.remove`, `agency.add`, `agency.remove`.
 
-The six keyword/committee/sponsor actions log to `activity_log` using the same action names and row structure as the previous browser-side implementation. Agency add/remove intentionally do not log. This implementation does not yet tighten RLS; browser direct writes remain possible until the authorization phase after this slice.
+The six keyword/committee/sponsor actions log to `activity_log` using the same action names and row structure as the previous browser-side implementation. Agency add/remove intentionally do not log. The versioned migration `migrations/2026-09-15-tighten-config-table-rls.sql` removes anon INSERT, UPDATE, and DELETE policies for these four tables while retaining anon SELECT.
+
+## RLS rollout and rollback
+
+Apply `migrations/2026-09-15-tighten-config-table-rls.sql` manually in Supabase SQL Editor:
+
+Preview:
+- run the migration against the Preview Supabase project
+- verify browser SELECTs still load
+- verify keyword, committee, sponsor, and agency add/remove flows work through `/api/app-data.js`
+- verify direct anon INSERT, UPDATE, and DELETE attempts are rejected
+
+Production:
+- only after Preview passes, run the same migration against Production Supabase
+- re-test the four UI mutation flows
+
+Rollback only the previous anon write policies for these four tables if required:
+
+```sql
+DROP POLICY IF EXISTS "anon can insert tracked_keywords" ON tracked_keywords;
+CREATE POLICY "anon can insert tracked_keywords" ON tracked_keywords FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS "anon can delete tracked_keywords" ON tracked_keywords;
+CREATE POLICY "anon can delete tracked_keywords" ON tracked_keywords FOR DELETE TO anon USING (true);
+
+DROP POLICY IF EXISTS "anon can insert tracked_committees" ON tracked_committees;
+CREATE POLICY "anon can insert tracked_committees" ON tracked_committees FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS "anon can delete tracked_committees" ON tracked_committees;
+CREATE POLICY "anon can delete tracked_committees" ON tracked_committees FOR DELETE TO anon USING (true);
+
+DROP POLICY IF EXISTS "anon can insert tracked_sponsors" ON tracked_sponsors;
+CREATE POLICY "anon can insert tracked_sponsors" ON tracked_sponsors FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS "anon can delete tracked_sponsors" ON tracked_sponsors;
+CREATE POLICY "anon can delete tracked_sponsors" ON tracked_sponsors FOR DELETE TO anon USING (true);
+
+DROP POLICY IF EXISTS "anon can insert tracked_agencies" ON tracked_agencies;
+CREATE POLICY "anon can insert tracked_agencies" ON tracked_agencies FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS "anon can delete tracked_agencies" ON tracked_agencies;
+CREATE POLICY "anon can delete tracked_agencies" ON tracked_agencies FOR DELETE TO anon USING (true);
+```
 
 Why this group first:
 - it is a coherent, small UI surface with low blast radius

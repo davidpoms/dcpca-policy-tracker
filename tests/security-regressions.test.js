@@ -685,6 +685,43 @@ test('repository guardrails block historical secret drift and keep the app-data 
   }
 });
 
+test('config-table RLS keeps anon reads and removes anon writes', () => {
+  const tables = [
+    'tracked_keywords',
+    'tracked_committees',
+    'tracked_sponsors',
+    'tracked_agencies'
+  ];
+  const canonicalRls = readRepoText('rls-migration.sql');
+  const versionedMigration = readRepoText('migrations/2026-09-15-tighten-config-table-rls.sql');
+  const appData = readRepoText('api/app-data.js');
+  const expectedActions = [
+    'keyword.add',
+    'keyword.remove',
+    'committee.add',
+    'committee.remove',
+    'sponsor.add',
+    'sponsor.remove',
+    'agency.add',
+    'agency.remove'
+  ];
+  const actionBlock = appData.match(/const ALLOWED_ACTIONS = new Set\(\[([\s\S]*?)\]\);/);
+
+  assert.ok(actionBlock);
+  assert.deepEqual([...actionBlock[1].matchAll(/'([^']+)'/g)].map((match) => match[1]), expectedActions);
+
+  for (const table of tables) {
+    assert.match(canonicalRls, new RegExp(`CREATE POLICY "anon can read ${table}"\\s+ON ${table} FOR SELECT TO anon`));
+    assert.doesNotMatch(canonicalRls, new RegExp(`CREATE POLICY "anon can (?:insert|update|delete) ${table}"`));
+
+    assert.match(versionedMigration, new RegExp(`DROP POLICY IF EXISTS "anon can insert ${table}" ON ${table}`));
+    assert.match(versionedMigration, new RegExp(`DROP POLICY IF EXISTS "anon can update ${table}" ON ${table}`));
+    assert.match(versionedMigration, new RegExp(`DROP POLICY IF EXISTS "anon can delete ${table}" ON ${table}`));
+    assert.match(versionedMigration, new RegExp(`CREATE POLICY "anon can read ${table}" ON ${table} FOR SELECT TO anon`));
+    assert.doesNotMatch(versionedMigration, new RegExp(`CREATE POLICY "anon can (?:insert|update|delete) ${table}"`));
+  }
+});
+
 test('server-side JavaScript files in /api and /lib pass node syntax checks', async () => {
   const apiFiles = collectApiFiles();
   const libFiles = fs.readdirSync(path.join(projectRoot, 'lib'))

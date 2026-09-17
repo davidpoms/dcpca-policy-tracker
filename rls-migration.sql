@@ -65,11 +65,10 @@ ALTER TABLE tracked_keywords ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "anon can read tracked_keywords"   ON tracked_keywords;
 DROP POLICY IF EXISTS "anon can insert tracked_keywords" ON tracked_keywords;
+DROP POLICY IF EXISTS "anon can update tracked_keywords" ON tracked_keywords;
 DROP POLICY IF EXISTS "anon can delete tracked_keywords" ON tracked_keywords;
 
 CREATE POLICY "anon can read tracked_keywords"   ON tracked_keywords FOR SELECT TO anon USING (true);
-CREATE POLICY "anon can insert tracked_keywords" ON tracked_keywords FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "anon can delete tracked_keywords" ON tracked_keywords FOR DELETE TO anon USING (true);
 
 -- ─── tracked_committees ───────────────────────────────────────────────────────
 
@@ -77,11 +76,10 @@ ALTER TABLE tracked_committees ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "anon can read tracked_committees"   ON tracked_committees;
 DROP POLICY IF EXISTS "anon can insert tracked_committees" ON tracked_committees;
+DROP POLICY IF EXISTS "anon can update tracked_committees" ON tracked_committees;
 DROP POLICY IF EXISTS "anon can delete tracked_committees" ON tracked_committees;
 
 CREATE POLICY "anon can read tracked_committees"   ON tracked_committees FOR SELECT TO anon USING (true);
-CREATE POLICY "anon can insert tracked_committees" ON tracked_committees FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "anon can delete tracked_committees" ON tracked_committees FOR DELETE TO anon USING (true);
 
 -- ─── tracked_sponsors ─────────────────────────────────────────────────────────
 
@@ -89,11 +87,10 @@ ALTER TABLE tracked_sponsors ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "anon can read tracked_sponsors"   ON tracked_sponsors;
 DROP POLICY IF EXISTS "anon can insert tracked_sponsors" ON tracked_sponsors;
+DROP POLICY IF EXISTS "anon can update tracked_sponsors" ON tracked_sponsors;
 DROP POLICY IF EXISTS "anon can delete tracked_sponsors" ON tracked_sponsors;
 
 CREATE POLICY "anon can read tracked_sponsors"   ON tracked_sponsors FOR SELECT TO anon USING (true);
-CREATE POLICY "anon can insert tracked_sponsors" ON tracked_sponsors FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "anon can delete tracked_sponsors" ON tracked_sponsors FOR DELETE TO anon USING (true);
 
 -- ─── tracked_agencies ─────────────────────────────────────────────────────────
 
@@ -101,11 +98,10 @@ ALTER TABLE tracked_agencies ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "anon can read tracked_agencies"   ON tracked_agencies;
 DROP POLICY IF EXISTS "anon can insert tracked_agencies" ON tracked_agencies;
+DROP POLICY IF EXISTS "anon can update tracked_agencies" ON tracked_agencies;
 DROP POLICY IF EXISTS "anon can delete tracked_agencies" ON tracked_agencies;
 
 CREATE POLICY "anon can read tracked_agencies"   ON tracked_agencies FOR SELECT TO anon USING (true);
-CREATE POLICY "anon can insert tracked_agencies" ON tracked_agencies FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "anon can delete tracked_agencies" ON tracked_agencies FOR DELETE TO anon USING (true);
 
 -- ─── lims_bill_cache ──────────────────────────────────────────────────────────
 -- Read-only from the browser; writes happen only via server-side cron
