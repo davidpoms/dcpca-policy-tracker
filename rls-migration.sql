@@ -67,6 +67,9 @@ DROP POLICY IF EXISTS "anon can read tracked_keywords"   ON tracked_keywords;
 DROP POLICY IF EXISTS "anon can insert tracked_keywords" ON tracked_keywords;
 DROP POLICY IF EXISTS "anon can update tracked_keywords" ON tracked_keywords;
 DROP POLICY IF EXISTS "anon can delete tracked_keywords" ON tracked_keywords;
+DROP POLICY IF EXISTS "Allow public read access" ON tracked_keywords;
+DROP POLICY IF EXISTS "Allow public insert" ON tracked_keywords;
+DROP POLICY IF EXISTS "Allow public delete" ON tracked_keywords;
 
 CREATE POLICY "anon can read tracked_keywords"   ON tracked_keywords FOR SELECT TO anon USING (true);
 
@@ -78,6 +81,9 @@ DROP POLICY IF EXISTS "anon can read tracked_committees"   ON tracked_committees
 DROP POLICY IF EXISTS "anon can insert tracked_committees" ON tracked_committees;
 DROP POLICY IF EXISTS "anon can update tracked_committees" ON tracked_committees;
 DROP POLICY IF EXISTS "anon can delete tracked_committees" ON tracked_committees;
+DROP POLICY IF EXISTS "Allow public read access" ON tracked_committees;
+DROP POLICY IF EXISTS "Allow public insert" ON tracked_committees;
+DROP POLICY IF EXISTS "Allow public delete" ON tracked_committees;
 
 CREATE POLICY "anon can read tracked_committees"   ON tracked_committees FOR SELECT TO anon USING (true);
 
@@ -89,6 +95,9 @@ DROP POLICY IF EXISTS "anon can read tracked_sponsors"   ON tracked_sponsors;
 DROP POLICY IF EXISTS "anon can insert tracked_sponsors" ON tracked_sponsors;
 DROP POLICY IF EXISTS "anon can update tracked_sponsors" ON tracked_sponsors;
 DROP POLICY IF EXISTS "anon can delete tracked_sponsors" ON tracked_sponsors;
+DROP POLICY IF EXISTS "Allow public read access" ON tracked_sponsors;
+DROP POLICY IF EXISTS "Allow public insert" ON tracked_sponsors;
+DROP POLICY IF EXISTS "Allow public delete" ON tracked_sponsors;
 
 CREATE POLICY "anon can read tracked_sponsors"   ON tracked_sponsors FOR SELECT TO anon USING (true);
 
@@ -100,6 +109,9 @@ DROP POLICY IF EXISTS "anon can read tracked_agencies"   ON tracked_agencies;
 DROP POLICY IF EXISTS "anon can insert tracked_agencies" ON tracked_agencies;
 DROP POLICY IF EXISTS "anon can update tracked_agencies" ON tracked_agencies;
 DROP POLICY IF EXISTS "anon can delete tracked_agencies" ON tracked_agencies;
+DROP POLICY IF EXISTS "Allow public read access" ON tracked_agencies;
+DROP POLICY IF EXISTS "Allow public insert" ON tracked_agencies;
+DROP POLICY IF EXISTS "Allow public delete" ON tracked_agencies;
 
 CREATE POLICY "anon can read tracked_agencies"   ON tracked_agencies FOR SELECT TO anon USING (true);
 

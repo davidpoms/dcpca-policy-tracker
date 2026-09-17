@@ -713,12 +713,17 @@ test('config-table RLS keeps anon reads and removes anon writes', () => {
   for (const table of tables) {
     assert.match(canonicalRls, new RegExp(`CREATE POLICY "anon can read ${table}"\\s+ON ${table} FOR SELECT TO anon`));
     assert.doesNotMatch(canonicalRls, new RegExp(`CREATE POLICY "anon can (?:insert|update|delete) ${table}"`));
+    assert.doesNotMatch(canonicalRls, new RegExp(`CREATE POLICY "Allow public (?:read access|insert|delete)"\\s+ON ${table}`));
 
     assert.match(versionedMigration, new RegExp(`DROP POLICY IF EXISTS "anon can insert ${table}" ON ${table}`));
     assert.match(versionedMigration, new RegExp(`DROP POLICY IF EXISTS "anon can update ${table}" ON ${table}`));
     assert.match(versionedMigration, new RegExp(`DROP POLICY IF EXISTS "anon can delete ${table}" ON ${table}`));
+    assert.match(versionedMigration, new RegExp(`DROP POLICY IF EXISTS "Allow public read access" ON ${table}`));
+    assert.match(versionedMigration, new RegExp(`DROP POLICY IF EXISTS "Allow public insert" ON ${table}`));
+    assert.match(versionedMigration, new RegExp(`DROP POLICY IF EXISTS "Allow public delete" ON ${table}`));
     assert.match(versionedMigration, new RegExp(`CREATE POLICY "anon can read ${table}" ON ${table} FOR SELECT TO anon`));
     assert.doesNotMatch(versionedMigration, new RegExp(`CREATE POLICY "anon can (?:insert|update|delete) ${table}"`));
+    assert.doesNotMatch(versionedMigration, new RegExp(`CREATE POLICY "Allow public (?:read access|insert|delete)"\\s+ON ${table}`));
   }
 });
 

@@ -424,7 +424,7 @@ Each action is explicit and validated. The route should reject unknown actions w
 
 Implemented first migration slice: `keyword.add`, `keyword.remove`, `committee.add`, `committee.remove`, `sponsor.add`, `sponsor.remove`, `agency.add`, `agency.remove`.
 
-The six keyword/committee/sponsor actions log to `activity_log` using the same action names and row structure as the previous browser-side implementation. Agency add/remove intentionally do not log. The versioned migration `migrations/2026-09-15-tighten-config-table-rls.sql` removes anon INSERT, UPDATE, and DELETE policies for these four tables while retaining anon SELECT.
+The six keyword/committee/sponsor actions log to `activity_log` using the same action names and row structure as the previous browser-side implementation. Agency add/remove intentionally do not log. The versioned migration `migrations/2026-09-15-tighten-config-table-rls.sql` removes anon INSERT, UPDATE, and DELETE policies for these four tables while retaining anon SELECT. It also removes legacy PUBLIC-role policies discovered during the Production inventory.
 
 ## RLS rollout and rollback
 
@@ -440,7 +440,9 @@ Production:
 - only after Preview passes, run the same migration against Production Supabase
 - re-test the four UI mutation flows
 
-Rollback only the previous anon write policies for these four tables if required:
+The Preview inventory originally had only anon SELECT, INSERT, and DELETE policies for these tables. Production additionally had legacy PUBLIC-role SELECT, INSERT, and DELETE policies named `Allow public read access`, `Allow public insert`, and `Allow public delete` on tracked keywords, committees, and sponsors. Because `TO public` applies broadly, removing only anon write policies would leave direct browser writes open.
+
+Common anon rollback, restoring the previous anon INSERT and DELETE policies for all four tables if required:
 
 ```sql
 DROP POLICY IF EXISTS "anon can insert tracked_keywords" ON tracked_keywords;
@@ -463,6 +465,33 @@ CREATE POLICY "anon can insert tracked_agencies" ON tracked_agencies FOR INSERT 
 DROP POLICY IF EXISTS "anon can delete tracked_agencies" ON tracked_agencies;
 CREATE POLICY "anon can delete tracked_agencies" ON tracked_agencies FOR DELETE TO anon USING (true);
 ```
+
+Production legacy rollback, only if specifically required to restore the pre-migration Production inventory:
+
+```sql
+DROP POLICY IF EXISTS "Allow public read access" ON tracked_keywords;
+CREATE POLICY "Allow public read access" ON tracked_keywords FOR SELECT TO public USING (true);
+DROP POLICY IF EXISTS "Allow public insert" ON tracked_keywords;
+CREATE POLICY "Allow public insert" ON tracked_keywords FOR INSERT TO public WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow public delete" ON tracked_keywords;
+CREATE POLICY "Allow public delete" ON tracked_keywords FOR DELETE TO public USING (true);
+
+DROP POLICY IF EXISTS "Allow public read access" ON tracked_committees;
+CREATE POLICY "Allow public read access" ON tracked_committees FOR SELECT TO public USING (true);
+DROP POLICY IF EXISTS "Allow public insert" ON tracked_committees;
+CREATE POLICY "Allow public insert" ON tracked_committees FOR INSERT TO public WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow public delete" ON tracked_committees;
+CREATE POLICY "Allow public delete" ON tracked_committees FOR DELETE TO public USING (true);
+
+DROP POLICY IF EXISTS "Allow public read access" ON tracked_sponsors;
+CREATE POLICY "Allow public read access" ON tracked_sponsors FOR SELECT TO public USING (true);
+DROP POLICY IF EXISTS "Allow public insert" ON tracked_sponsors;
+CREATE POLICY "Allow public insert" ON tracked_sponsors FOR INSERT TO public WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow public delete" ON tracked_sponsors;
+CREATE POLICY "Allow public delete" ON tracked_sponsors FOR DELETE TO public USING (true);
+```
+
+Do not apply the Production legacy rollback for tracked agencies. Restoring the legacy PUBLIC-role write policies reopens the security issue and should be reserved for an emergency rollback.
 
 Why this group first:
 - it is a coherent, small UI surface with low blast radius
