@@ -222,6 +222,32 @@
                 }));
         }
 
+        const normalizeCommittees = (value) => {
+            if (Array.isArray(value)) return value;
+
+            if (typeof value !== 'string') return [];
+
+            const text = value.trim();
+            if (!text || text === 'null') return [];
+
+            try {
+                const parsed = JSON.parse(text);
+                if (Array.isArray(parsed)) {
+                    return parsed;
+                }
+                if (typeof parsed === 'string' && parsed.trim()) {
+                    return [parsed.trim()];
+                }
+            } catch {
+                // Not JSON; fall through to legacy/plain-text handling.
+            }
+
+            return text
+                .split(';')
+                .map(value => value.trim())
+                .filter(Boolean);
+        };
+
         function App() {
             const [authenticated, setAuthenticated] = useState(false);
             const [passwordInput, setPasswordInput] = useState('');
@@ -405,7 +431,7 @@
                         const displayItems = trackedData.map(item => ({
                             id: item.id, title: item.title, billNumber: item.bill_number,
                             category: item.category, status: item.status,
-                            committees: item.committees || [], date: item.date,
+                            committees: normalizeCommittees(item.committees), date: item.date,
                             description: item.description, link: item.link,
                             source: item.source, agency: item.agency, isNew: item.is_new,
                             assignedTo: item.assigned_to, priority: item.priority,
@@ -796,8 +822,7 @@
                     });
 
                     const transformedItems = allLegislation.map(leg => {
-                        const cs = leg.referredToCommittees;
-                        const committees = (cs && cs !== 'null' && typeof cs === 'string' && cs.trim()) ? [cs] : [];
+                        const committees = normalizeCommittees(leg.referredToCommittees);
                         const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || null);
                         const introducedBy = parseMembers(leg.introducers) || leg.introducedBy || leg.primarySponsor || leg.sponsor || null;
                         const coIntroducers = parseMembers(leg.coIntroducers) || null;
@@ -874,8 +899,7 @@
                         }
                     });
                     const transformedItems = allLegislation.map(leg => {
-                        const cs = leg.referredToCommittees;
-                        const committees = (cs && cs !== 'null' && typeof cs === 'string' && cs.trim()) ? [cs] : [];
+                        const committees = normalizeCommittees(leg.referredToCommittees);
                         const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || null);
                         const introducedBy = parseMembers(leg.introducers) || leg.introducedBy || leg.primarySponsor || leg.sponsor || null;
                         const coIntroducers = parseMembers(leg.coIntroducers) || null;

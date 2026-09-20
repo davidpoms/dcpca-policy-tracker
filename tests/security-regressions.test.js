@@ -947,6 +947,19 @@ test('repository guardrails keep note mutations behind the authenticated API and
   assert.ok(apiFiles.length <= 12, `Expected /api count <= 12, got ${apiFiles.length}`);
 });
 
+test('frontend committee normalization keeps array data safe at the render boundary', () => {
+  const appText = readRepoText('index.html');
+
+  assert.match(appText, /const normalizeCommittees = \(value\) => \{/);
+  assert.match(appText, /if \(!text \|\| text === 'null'\) return \[\];/);
+  assert.match(appText, /JSON\.parse\(text\)/);
+  assert.match(appText, /split\(';'/);
+  assert.match(appText, /filter\(Boolean\)/);
+  assert.doesNotMatch(appText, /committees:\s*item\.committees\s*\|\|\s*\[\]/);
+  assert.match(appText, /committees:\s*normalizeCommittees\(item\.committees\)/);
+  assert.match(appText, /const committees = normalizeCommittees\(leg\.referredToCommittees\);/);
+});
+
 test('server-side JavaScript files in /api and /lib pass node syntax checks', async () => {
   const apiFiles = collectApiFiles();
   const libFiles = fs.readdirSync(path.join(projectRoot, 'lib'))
