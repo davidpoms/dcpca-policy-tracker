@@ -1029,11 +1029,25 @@
             const saveNote = async () => {
                 if (!editingNote) return;
                 const item = items.find(i => i.id === editingNote);
+                const activityAction = itemNotes[editingNote] ? 'note_updated' : 'note_added';
                 try {
-                    const { error } = await supabase.from('item_notes').upsert({ item_id: editingNote, note_text: noteText });
-                    if (error) throw error;
-                    setItemNotes({...itemNotes, [editingNote]: noteText});
-                    await logActivity(itemNotes[editingNote] ? 'note_updated' : 'note_added', editingNote, item?.title || 'Unknown');
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({
+                            action: 'note.save',
+                            itemId: editingNote,
+                            noteText,
+                            activityAction,
+                            itemTitle: item?.title || 'Unknown'
+                        })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        throw new Error(data?.error || 'Failed to save note');
+                    }
+                    setItemNotes({ ...itemNotes, [editingNote]: noteText });
                     setEditingNote(null);
                     setNoteText('');
                 } catch (err) { setError('Failed to save note: ' + err.message); }
@@ -1042,12 +1056,23 @@
             const deleteNote = async (itemId) => {
                 const item = items.find(i => i.id === itemId);
                 try {
-                    const { error } = await supabase.from('item_notes').delete().eq('item_id', itemId);
-                    if (error) throw error;
-                    const newNotes = {...itemNotes};
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({
+                            action: 'note.delete',
+                            itemId,
+                            itemTitle: item?.title || 'Unknown'
+                        })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        throw new Error(data?.error || 'Failed to delete note');
+                    }
+                    const newNotes = { ...itemNotes };
                     delete newNotes[itemId];
                     setItemNotes(newNotes);
-                    await logActivity('note_deleted', itemId, item?.title || 'Unknown');
                 } catch (err) { setError('Failed to delete note: ' + err.message); }
             };
 

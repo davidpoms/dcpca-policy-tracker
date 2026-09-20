@@ -18,6 +18,33 @@ The route must:
 - use a strict action allow-list
 - preserve current application behavior until each action is migrated
 
+### item_notes RLS inventory and rollout
+
+Preview inventory:
+- `item_notes` currently has anonymous INSERT/UPDATE/DELETE policies in Preview, plus anonymous SELECT access.
+- The legacy `PUBLIC` role is not the primary issue in Preview; the direct browser path is still allowed through the anon policies.
+
+Production inventory:
+- `item_notes` has the same anon policies plus legacy `PUBLIC` SELECT/INSERT/UPDATE/DELETE policies when the database drift is present.
+- The direct browser client is therefore able to write notes from both the anon and public role paths unless the policy set is tightened.
+
+Rollout:
+1. deploy code while the existing RLS is still permissive
+2. test note save/edit/delete through the authenticated API in Preview
+3. apply the item_notes RLS migration to Preview
+4. verify direct anon INSERT/UPDATE/DELETE are rejected after the Preview migration is applied
+5. apply to Production only after Preview passes
+
+Rollback:
+- Common emergency rollback: restore the original anonymous INSERT/UPDATE/DELETE policies for `item_notes` if a production issue requires immediate fallback.
+- Production-only legacy `PUBLIC` emergency rollback: restore `PUBLIC` INSERT/UPDATE/DELETE policies if required to recover access, but this intentionally reopens the security issue and must be treated as a temporary emergency-only step.
+- `public UPDATE` rollback must use:
+  ```sql
+  CREATE POLICY "Allow public update" ON item_notes FOR UPDATE TO public USING (true)
+  ```
+  with no explicit `WITH CHECK` clause; restoring `PUBLIC` writes without matching the original pattern leaves the table exposed again.
+- Warning: restoring `PUBLIC` policies reopens the same write path that this migration is designed to close.
+
 ## Session/auth model
 
 The future route follows the existing app contract:
@@ -172,59 +199,47 @@ Each action is explicit and validated. The route should reject unknown actions w
   - `toggleSelection()` when untracking an item
   - `deleteManualEntry()`
 
-### note.create
+### note.save
+- Status: IMPLEMENTED
 - Request body contract
-  - `{ action: 'note.create', itemId: '...', noteText: '...' }`
+  - `{ action: 'note.save', itemId: '...', noteText: '...', activityAction: 'note_added' | 'note_updated', itemTitle: '...' }`
 - Allowed fields
   - `itemId`
   - `noteText`
+  - `activityAction`
+  - `itemTitle`
 - Required identifiers
   - `itemId` required
-  - `noteText` required
+  - `noteText` must be a string (empty strings remain accepted to preserve current browser behavior)
+  - `activityAction` must be `note_added` or `note_updated`
 - Server-side validation
-  - reject empty `noteText` after trim
-  - validate `itemId`
+  - reject invalid or tampered request shape
+  - preserve current browser-side save semantics exactly
 - Supabase operation(s)
-  - `upsert` into `item_notes` on `item_id`
+  - `POST` to `item_notes` with `?on_conflict=item_id` and `Prefer: resolution=merge-duplicates`
 - Expected response contract
-  - `{ ok: true, itemId: '...' }`
+  - `{ ok: true, itemId: '...', noteText: '...' }`
 - Related audit/history side effects
-  - `activity_log` insert for `note_added`
-- Existing frontend functions that would switch to this action
+  - `activity_log` insert for `note_added` or `note_updated`
+- Existing frontend functions that switched to this action
   - `saveNote()` in the add/edit note flow
 
-### note.update
-- Request body contract
-  - `{ action: 'note.update', itemId: '...', noteText: '...' }`
-- Allowed fields
-  - same as `note.create`
-- Required identifiers
-  - `itemId` required
-- Server-side validation
-  - same as `note.create`
-- Supabase operation(s)
-  - `upsert` into `item_notes`
-- Expected response contract
-  - `{ ok: true, itemId: '...' }`
-- Related audit/history side effects
-  - `activity_log` insert for `note_updated`
-- Existing frontend functions that would switch to this action
-  - `saveNote()` when an existing note is being replaced
-
 ### note.delete
+- Status: IMPLEMENTED
 - Request body contract
-  - `{ action: 'note.delete', itemId: '...' }`
+  - `{ action: 'note.delete', itemId: '...', itemTitle: '...' }`
 - Allowed fields
   - `itemId`
+  - `itemTitle`
 - Required identifiers
   - `itemId` required
 - Supabase operation(s)
-  - `delete` from `item_notes` with `.eq('item_id', itemId)`
+  - `DELETE` from `item_notes` with `.eq('item_id', itemId)`
 - Expected response contract
   - `{ ok: true, itemId: '...' }`
 - Related audit/history side effects
   - `activity_log` insert for `note_deleted`
-- Existing frontend functions that would switch to this action
+- Existing frontend functions that switched to this action
   - `deleteNote()`
 
 ### keyword.add

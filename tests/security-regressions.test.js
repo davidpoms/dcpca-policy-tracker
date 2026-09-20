@@ -703,7 +703,9 @@ test('config-table RLS keeps anon reads and removes anon writes', () => {
     'sponsor.add',
     'sponsor.remove',
     'agency.add',
-    'agency.remove'
+    'agency.remove',
+    'note.save',
+    'note.delete'
   ];
   const actionBlock = appData.match(/const ALLOWED_ACTIONS = new Set\(\[([\s\S]*?)\]\);/);
 
@@ -725,6 +727,224 @@ test('config-table RLS keeps anon reads and removes anon writes', () => {
     assert.doesNotMatch(versionedMigration, new RegExp(`CREATE POLICY "anon can (?:insert|update|delete) ${table}"`));
     assert.doesNotMatch(versionedMigration, new RegExp(`CREATE POLICY "Allow public (?:read access|insert|delete)"\\s+ON ${table}`));
   }
+});
+
+test('item_notes RLS migration keeps anon reads and removes anon/public writes', () => {
+  const canonicalRls = readRepoText('rls-migration.sql');
+  const versionedMigration = readRepoText('migrations/2026-09-18-tighten-item-notes-rls.sql');
+
+  assert.match(canonicalRls, /ALTER TABLE item_notes ENABLE ROW LEVEL SECURITY;/);
+  assert.match(canonicalRls, /DROP POLICY IF EXISTS "anon can read item_notes"\s+ON item_notes;/);
+  assert.match(canonicalRls, /DROP POLICY IF EXISTS "anon can upsert item_notes"\s+ON item_notes;/);
+  assert.match(canonicalRls, /DROP POLICY IF EXISTS "anon can update item_notes"\s+ON item_notes;/);
+  assert.match(canonicalRls, /DROP POLICY IF EXISTS "anon can delete item_notes"\s+ON item_notes;/);
+  assert.match(canonicalRls, /DROP POLICY IF EXISTS "Allow public read access"\s+ON item_notes;/);
+  assert.match(canonicalRls, /DROP POLICY IF EXISTS "Allow public insert"\s+ON item_notes;/);
+  assert.match(canonicalRls, /DROP POLICY IF EXISTS "Allow public update"\s+ON item_notes;/);
+  assert.match(canonicalRls, /DROP POLICY IF EXISTS "Allow public delete"\s+ON item_notes;/);
+  assert.match(canonicalRls, /CREATE POLICY "anon can read item_notes"\s+ON item_notes FOR SELECT TO anon USING \(true\);/);
+  assert.doesNotMatch(canonicalRls, /CREATE POLICY "anon can (?:upsert|insert|update|delete) item_notes"/);
+  assert.doesNotMatch(canonicalRls, /CREATE POLICY "Allow public (?:read access|insert|update|delete)"\s+ON item_notes/);
+
+  assert.match(versionedMigration, /DROP POLICY IF EXISTS "anon can upsert item_notes" ON item_notes;/);
+  assert.match(versionedMigration, /DROP POLICY IF EXISTS "anon can update item_notes" ON item_notes;/);
+  assert.match(versionedMigration, /DROP POLICY IF EXISTS "anon can delete item_notes" ON item_notes;/);
+  assert.match(versionedMigration, /DROP POLICY IF EXISTS "anon can read item_notes" ON item_notes;/);
+  assert.match(versionedMigration, /DROP POLICY IF EXISTS "Allow public read access" ON item_notes;/);
+  assert.match(versionedMigration, /DROP POLICY IF EXISTS "Allow public insert" ON item_notes;/);
+  assert.match(versionedMigration, /DROP POLICY IF EXISTS "Allow public update" ON item_notes;/);
+  assert.match(versionedMigration, /DROP POLICY IF EXISTS "Allow public delete" ON item_notes;/);
+  assert.match(versionedMigration, /CREATE POLICY "anon can read item_notes"\s+ON item_notes\s+FOR SELECT\s+TO anon\s+USING \(true\);/);
+  assert.doesNotMatch(versionedMigration, /CREATE POLICY "anon can (?:upsert|insert|update|delete) item_notes"/);
+  assert.doesNotMatch(versionedMigration, /CREATE POLICY "Allow public (?:read access|insert|update|delete)"\s+ON item_notes/);
+});
+
+test('api/app-data.js accepts and validates note.save and note.delete payloads', async () => {
+  const handler = await importFresh('api/app-data.js');
+  const libSession = await importFreshModule('lib/session.js');
+  const { createSignedSession } = libSession;
+  const calls = [];
+  const originalFetch = global.fetch;
+
+  global.fetch = async (url, init = {}) => {
+    calls.push({
+      url,
+      method: init.method || 'GET',
+      headers: init.headers || {},
+      body: init.body ? JSON.parse(init.body) : undefined
+    });
+
+    if (url.startsWith('https://example.supabase.co/rest/v1/item_notes')) {
+      return { ok: true, status: 200, json: async () => ({ ok: true }), text: async () => '' };
+    }
+
+    if (url === 'https://example.supabase.co/rest/v1/activity_log') {
+      return { ok: true, status: 200, json: async () => ({ ok: true }), text: async () => '' };
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  try {
+    await withEnv({
+      SESSION_SECRET: 'app-data-secret',
+      SUPABASE_URL: 'https://example.supabase.co',
+      SUPABASE_SERVICE_KEY: 'service-key'
+    }, async () => {
+      const cookie = `dc_tracker_session=${encodeURIComponent(createSignedSession(Date.now() + 60 * 1000))}`;
+
+      const missingKeysRes = makeRes();
+      await handler({ method: 'POST', headers: { cookie }, body: JSON.stringify({ action: 'note.save', itemId: 'item-1', noteText: 'hello' }) }, missingKeysRes);
+      assert.equal(missingKeysRes.statusCode, 400);
+      assert.equal(missingKeysRes.body.error, 'Invalid request');
+
+      const badItemIdRes = makeRes();
+      await handler({ method: 'POST', headers: { cookie }, body: JSON.stringify({ action: 'note.save', itemId: 3, noteText: 'hello', activityAction: 'note_added', itemTitle: 'Title' }) }, badItemIdRes);
+      assert.equal(badItemIdRes.statusCode, 400);
+      assert.equal(badItemIdRes.body.error, 'Invalid request');
+
+      const whitespaceItemIdRes = makeRes();
+      await handler({ method: 'POST', headers: { cookie }, body: JSON.stringify({ action: 'note.save', itemId: '   ', noteText: 'hello', activityAction: 'note_added', itemTitle: 'Title' }) }, whitespaceItemIdRes);
+      assert.equal(whitespaceItemIdRes.statusCode, 400);
+      assert.equal(whitespaceItemIdRes.body.error, 'Invalid request');
+
+      const badTextRes = makeRes();
+      await handler({ method: 'POST', headers: { cookie }, body: JSON.stringify({ action: 'note.save', itemId: 'item-1', noteText: 5, activityAction: 'note_added', itemTitle: 'Title' }) }, badTextRes);
+      assert.equal(badTextRes.statusCode, 400);
+      assert.equal(badTextRes.body.error, 'Invalid request');
+
+      const validSaveRes = makeRes();
+      const noteText = '  hello world  ';
+      await handler({ method: 'POST', headers: { cookie }, body: JSON.stringify({ action: 'note.save', itemId: 'item-1', noteText, activityAction: 'note_added', itemTitle: 'Alpha Item' }) }, validSaveRes);
+      assert.equal(validSaveRes.statusCode, 200);
+      assert.deepEqual(validSaveRes.body, { ok: true, itemId: 'item-1', noteText });
+      assert.equal(calls.length, 2);
+      assert.equal(calls[0].method, 'POST');
+      assert.equal(calls[0].url, 'https://example.supabase.co/rest/v1/item_notes?on_conflict=item_id');
+      assert.deepEqual(calls[0].body, { item_id: 'item-1', note_text: noteText });
+      assert.equal(calls[0].headers.Prefer, 'resolution=merge-duplicates');
+      assert.deepEqual(calls[1].body, { action: 'note_added', item_id: 'item-1', item_title: 'Alpha Item', details: {} });
+
+      const badActionRes = makeRes();
+      await handler({ method: 'POST', headers: { cookie }, body: JSON.stringify({ action: 'note.save', itemId: 'item-1', noteText: 'hello', activityAction: 'note_missing', itemTitle: 'Title' }) }, badActionRes);
+      assert.equal(badActionRes.statusCode, 400);
+      assert.equal(badActionRes.body.error, 'Invalid request');
+
+      const badTitleRes = makeRes();
+      await handler({ method: 'POST', headers: { cookie }, body: JSON.stringify({ action: 'note.save', itemId: 'item-1', noteText: 'hello', activityAction: 'note_updated', itemTitle: 42 }) }, badTitleRes);
+      assert.equal(badTitleRes.statusCode, 400);
+      assert.equal(badTitleRes.body.error, 'Invalid request');
+
+      calls.length = 0;
+      const updatedSaveRes = makeRes();
+      await handler({ method: 'POST', headers: { cookie }, body: JSON.stringify({ action: 'note.save', itemId: 'item-2', noteText: 'updated value', activityAction: 'note_updated', itemTitle: 'Beta Item' }) }, updatedSaveRes);
+      assert.equal(updatedSaveRes.statusCode, 200);
+      assert.deepEqual(calls[0].body, { item_id: 'item-2', note_text: 'updated value' });
+      assert.deepEqual(calls[1].body, { action: 'note_updated', item_id: 'item-2', item_title: 'Beta Item', details: {} });
+
+      const deleteRes = makeRes();
+      calls.length = 0;
+      await handler({ method: 'POST', headers: { cookie }, body: JSON.stringify({ action: 'note.delete', itemId: 'item-3', itemTitle: 'Gamma Item' }) }, deleteRes);
+      assert.equal(deleteRes.statusCode, 200);
+      assert.deepEqual(deleteRes.body, { ok: true, itemId: 'item-3' });
+      assert.equal(calls[0].method, 'DELETE');
+      assert.equal(calls[0].url, 'https://example.supabase.co/rest/v1/item_notes?item_id=eq.item-3');
+      assert.equal(calls[0].body, undefined);
+      assert.deepEqual(calls[1].body, { action: 'note_deleted', item_id: 'item-3', item_title: 'Gamma Item', details: {} });
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('api/app-data.js treats note activity logging as nonfatal and note DB failures as fatal', async () => {
+  const handler = await importFresh('api/app-data.js');
+  const libSession = await importFreshModule('lib/session.js');
+  const { createSignedSession } = libSession;
+  const originalFetch = global.fetch;
+
+  try {
+    await withEnv({
+      SESSION_SECRET: 'app-data-secret',
+      SUPABASE_URL: 'https://example.supabase.co',
+      SUPABASE_SERVICE_KEY: 'service-key'
+    }, async () => {
+      const cookie = `dc_tracker_session=${encodeURIComponent(createSignedSession(Date.now() + 60 * 1000))}`;
+
+      global.fetch = async (url, init = {}) => {
+        if (url.startsWith('https://example.supabase.co/rest/v1/item_notes')) {
+          return { ok: true, status: 200, json: async () => ({ ok: true }), text: async () => '' };
+        }
+        if (url === 'https://example.supabase.co/rest/v1/activity_log') {
+          throw new Error('activity log failure');
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      };
+
+      const saveRes = makeRes();
+      await handler({ method: 'POST', headers: { cookie }, body: JSON.stringify({ action: 'note.save', itemId: 'item-9', noteText: '', activityAction: 'note_added', itemTitle: 'Title' }) }, saveRes);
+      assert.equal(saveRes.statusCode, 200);
+      assert.deepEqual(saveRes.body, { ok: true, itemId: 'item-9', noteText: '' });
+
+      global.fetch = async (url, init = {}) => {
+        if (url.startsWith('https://example.supabase.co/rest/v1/item_notes')) {
+          return { ok: false, status: 500, text: async () => 'Supabase item_notes failure SESSION_SECRET=topsecret service-key=super-secret' };
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      };
+
+      const saveFailureRes = makeRes();
+      await handler({ method: 'POST', headers: { cookie }, body: JSON.stringify({ action: 'note.save', itemId: 'item-10', noteText: 'boom', activityAction: 'note_updated', itemTitle: 'Title' }) }, saveFailureRes);
+      assert.equal(saveFailureRes.statusCode, 500);
+      assert.equal(saveFailureRes.body.error, 'Service unavailable');
+      assert.doesNotMatch(JSON.stringify(saveFailureRes.body), /SESSION_SECRET|SUPABASE_SERVICE_KEY|topsecret|super-secret|Supabase item_notes failure/i);
+
+      global.fetch = async (url, init = {}) => {
+        if (url.startsWith('https://example.supabase.co/rest/v1/item_notes')) {
+          return { ok: true, status: 200, json: async () => ({ ok: true }), text: async () => '' };
+        }
+        if (url === 'https://example.supabase.co/rest/v1/activity_log') {
+          throw new Error('activity log failure');
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      };
+
+      const deleteRes = makeRes();
+      await handler({ method: 'POST', headers: { cookie }, body: JSON.stringify({ action: 'note.delete', itemId: 'item-11', itemTitle: 'Title' }) }, deleteRes);
+      assert.equal(deleteRes.statusCode, 200);
+      assert.deepEqual(deleteRes.body, { ok: true, itemId: 'item-11' });
+
+      global.fetch = async (url, init = {}) => {
+        if (url.startsWith('https://example.supabase.co/rest/v1/item_notes')) {
+          return { ok: false, status: 500, text: async () => 'Supabase note delete failure service-key=super-secret' };
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      };
+
+      const deleteFailureRes = makeRes();
+      await handler({ method: 'POST', headers: { cookie }, body: JSON.stringify({ action: 'note.delete', itemId: 'item-12', itemTitle: 'Title' }) }, deleteFailureRes);
+      assert.equal(deleteFailureRes.statusCode, 500);
+      assert.equal(deleteFailureRes.body.error, 'Service unavailable');
+      assert.doesNotMatch(JSON.stringify(deleteFailureRes.body), /SESSION_SECRET|SUPABASE_SERVICE_KEY|super-secret|Supabase note delete failure/i);
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+
+test('repository guardrails keep note mutations behind the authenticated API and preserve direct item_notes reads', () => {
+  const appText = readRepoText('index.html');
+
+  assert.match(appText, /from\('item_notes'\)\.select\('\*'\)/);
+  assert.match(appText, /action:\s*'note\.save'/);
+  assert.match(appText, /action:\s*'note\.delete'/);
+  assert.doesNotMatch(appText, /from\('item_notes'\)\s*\.upsert/i);
+  assert.doesNotMatch(appText, /from\('item_notes'\)\s*\.delete\s*\(\)\s*\.eq\s*\('item_id'/i);
+  assert.doesNotMatch(appText, /from\('item_notes'\)\s*\.delete\s*\(\)/i);
+
+  const apiFiles = collectApiFiles();
+  assert.ok(apiFiles.length <= 12, `Expected /api count <= 12, got ${apiFiles.length}`);
 });
 
 test('server-side JavaScript files in /api and /lib pass node syntax checks', async () => {

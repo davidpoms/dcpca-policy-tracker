@@ -8,7 +8,9 @@ const ALLOWED_ACTIONS = new Set([
   'sponsor.add',
   'sponsor.remove',
   'agency.add',
-  'agency.remove'
+  'agency.remove',
+  'note.save',
+  'note.delete'
 ]);
 
 function isExactBody(body, allowedKeys) {
@@ -60,11 +62,12 @@ function normalizeKeywordValue(value) {
   return value.trim().toLowerCase();
 }
 
-async function supabaseTableRequest(url, serviceKey, table, method, body, query = '') {
+async function supabaseTableRequest(url, serviceKey, table, method, body, query = '', extraHeaders = {}) {
   const headers = {
     'Content-Type': 'application/json',
     apikey: serviceKey,
-    Authorization: `Bearer ${serviceKey}`
+    Authorization: `Bearer ${serviceKey}`,
+    ...extraHeaders
   };
 
   const targetUrl = `${url}/rest/v1/${table}${query}`;
@@ -333,6 +336,72 @@ export default async function handler(req, res) {
         );
 
         return res.status(200).json({ ok: true, agencyName });
+      }
+
+      case 'note.save': {
+        if (!isExactBody(body, ['action', 'itemId', 'noteText', 'activityAction', 'itemTitle'])) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        if (typeof body.itemId !== 'string' || body.itemId.trim() === '') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        if (typeof body.noteText !== 'string') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        if (body.activityAction !== 'note_added' && body.activityAction !== 'note_updated') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        if (typeof body.itemTitle !== 'string') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        const itemId = body.itemId;
+        const noteText = body.noteText;
+        const activityAction = body.activityAction;
+        const itemTitle = body.itemTitle;
+
+        await supabaseTableRequest(
+          supabaseUrl,
+          serviceKey,
+          'item_notes',
+          'POST',
+          { item_id: itemId, note_text: noteText },
+          '?on_conflict=item_id',
+          { Prefer: 'resolution=merge-duplicates' }
+        );
+        await logActivityEvent(supabaseUrl, serviceKey, activityAction, itemId, itemTitle, {});
+
+        return res.status(200).json({ ok: true, itemId, noteText });
+      }
+
+      case 'note.delete': {
+        if (!isExactBody(body, ['action', 'itemId', 'itemTitle'])) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        if (typeof body.itemId !== 'string' || body.itemId.trim() === '') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        if (typeof body.itemTitle !== 'string') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        const itemId = body.itemId;
+        const itemTitle = body.itemTitle;
+        const encodedId = encodeURIComponent(itemId);
+
+        await supabaseTableRequest(
+          supabaseUrl,
+          serviceKey,
+          'item_notes',
+          'DELETE',
+          null,
+          `?item_id=eq.${encodedId}`
+        );
+        await logActivityEvent(supabaseUrl, serviceKey, 'note_deleted', itemId, itemTitle, {});
+
+        return res.status(200).json({ ok: true, itemId });
       }
 
       default:

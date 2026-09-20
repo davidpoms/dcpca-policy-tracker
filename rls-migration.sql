@@ -31,11 +31,12 @@ DROP POLICY IF EXISTS "anon can read item_notes"   ON item_notes;
 DROP POLICY IF EXISTS "anon can upsert item_notes" ON item_notes;
 DROP POLICY IF EXISTS "anon can update item_notes" ON item_notes;
 DROP POLICY IF EXISTS "anon can delete item_notes" ON item_notes;
+DROP POLICY IF EXISTS "Allow public read access" ON item_notes;
+DROP POLICY IF EXISTS "Allow public insert" ON item_notes;
+DROP POLICY IF EXISTS "Allow public update" ON item_notes;
+DROP POLICY IF EXISTS "Allow public delete" ON item_notes;
 
 CREATE POLICY "anon can read item_notes"   ON item_notes FOR SELECT TO anon USING (true);
-CREATE POLICY "anon can upsert item_notes" ON item_notes FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "anon can update item_notes" ON item_notes FOR UPDATE TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "anon can delete item_notes" ON item_notes FOR DELETE TO anon USING (true);
 
 -- ─── bill_status_history ──────────────────────────────────────────────────────
 
