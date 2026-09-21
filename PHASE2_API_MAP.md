@@ -18,6 +18,12 @@ The route must:
 - use a strict action allow-list
 - preserve current application behavior until each action is migrated
 
+### team_members schema reconciliation
+
+Preview was created from the canonical schema without `team_members.email`, while Production already has the nullable `email` column. The additive migration `migrations/2026-09-21-add-team-members-email.sql` reconciles Preview without changing Production behavior. It intentionally does not add `added_at`, change RLS, or alter any primary-key type.
+
+Production uses integer member IDs while Preview uses UUID values. The later team-member API slice must treat IDs as opaque values: the frontend should send `teamMemberId: String(memberId)`, and the API may validate only that `teamMemberId` is a non-empty string. No ID-type unification is required for this schema reconciliation.
+
 ### item_notes RLS inventory and rollout
 
 Preview inventory:

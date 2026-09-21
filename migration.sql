@@ -78,6 +78,7 @@ CREATE INDEX IF NOT EXISTS idx_bill_status_history_changed_at ON bill_status_his
 CREATE TABLE IF NOT EXISTS team_members (
   id     uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   name   text NOT NULL UNIQUE,
+  email  text,
   active boolean DEFAULT true
 );
 

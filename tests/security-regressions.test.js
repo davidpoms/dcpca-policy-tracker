@@ -759,6 +759,24 @@ test('item_notes RLS migration keeps anon reads and removes anon/public writes',
   assert.doesNotMatch(versionedMigration, /CREATE POLICY "Allow public (?:read access|insert|update|delete)"\s+ON item_notes/);
 });
 
+test('team_members email reconciliation is additive and leaves IDs, RLS, and added_at unchanged', () => {
+  const canonicalMigration = readRepoText('migration.sql');
+  const versionedMigration = readRepoText('migrations/2026-09-21-add-team-members-email.sql');
+  const teamMembersBlock = canonicalMigration.match(/CREATE TABLE IF NOT EXISTS team_members \(([\s\S]*?)\n\);/);
+
+  assert.ok(teamMembersBlock);
+  assert.match(teamMembersBlock[1], /id\s+uuid\s+DEFAULT\s+gen_random_uuid\(\)\s+PRIMARY KEY/);
+  assert.match(teamMembersBlock[1], /email\s+text\s*(?:,|$)/);
+  assert.doesNotMatch(teamMembersBlock[1], /email\s+text\s+NOT NULL/);
+  assert.doesNotMatch(teamMembersBlock[1], /added_at/);
+
+  assert.match(versionedMigration, /ALTER TABLE team_members\s+ADD COLUMN IF NOT EXISTS email text;/);
+  assert.doesNotMatch(versionedMigration, /team_members[\s\S]*\bid\b\s+(?:integer|bigint|text)/i);
+  assert.doesNotMatch(versionedMigration, /PRIMARY KEY|DROP\s+CONSTRAINT|ALTER\s+COLUMN\s+id/i);
+  assert.doesNotMatch(versionedMigration, /CREATE POLICY|DROP POLICY|ENABLE ROW LEVEL SECURITY|DISABLE ROW LEVEL SECURITY/i);
+  assert.doesNotMatch(versionedMigration, /added_at/i);
+});
+
 test('api/app-data.js accepts and validates note.save and note.delete payloads', async () => {
   const handler = await importFresh('api/app-data.js');
   const libSession = await importFreshModule('lib/session.js');
