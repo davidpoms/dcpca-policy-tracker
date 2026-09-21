@@ -10,7 +10,10 @@ const ALLOWED_ACTIONS = new Set([
   'agency.add',
   'agency.remove',
   'note.save',
-  'note.delete'
+  'note.delete',
+  'teamMember.create',
+  'teamMember.update',
+  'teamMember.delete'
 ]);
 
 function isExactBody(body, allowedKeys) {
@@ -95,6 +98,24 @@ async function logActivityEvent(url, serviceKey, action, itemId = null, itemTitl
   } catch {
     // Preserve the previous browser-side logActivity behavior: do not block the main mutation if the audit insert fails.
   }
+}
+
+function isValidTeamMemberEmail(value) {
+  return typeof value === 'string' || value === null;
+}
+
+async function getTeamMember(url, serviceKey, teamMemberId) {
+  const encodedId = encodeURIComponent(teamMemberId);
+  const response = await supabaseTableRequest(
+    url,
+    serviceKey,
+    'team_members',
+    'GET',
+    null,
+    `?id=eq.${encodedId}&select=id,name,email,active`
+  );
+  const members = await response.json();
+  return Array.isArray(members) ? members[0] : null;
 }
 
 export default async function handler(req, res) {
@@ -402,6 +423,107 @@ export default async function handler(req, res) {
         await logActivityEvent(supabaseUrl, serviceKey, 'note_deleted', itemId, itemTitle, {});
 
         return res.status(200).json({ ok: true, itemId });
+      }
+
+      case 'teamMember.create': {
+        if (!isExactBody(body, ['action', 'name', 'email'])) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        if (typeof body.name !== 'string' || body.name.trim() === '' || !isValidTeamMemberEmail(body.email)) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        await supabaseTableRequest(
+          supabaseUrl,
+          serviceKey,
+          'team_members',
+          'POST',
+          { name: body.name, email: body.email, active: true }
+        );
+        await logActivityEvent(supabaseUrl, serviceKey, 'team_member_added', null, null, {
+          name: body.name
+        });
+
+        return res.status(200).json({ ok: true });
+      }
+
+      case 'teamMember.update': {
+        if (!isExactBody(body, ['action', 'teamMemberId', 'name', 'email'])) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        if (typeof body.teamMemberId !== 'string' || body.teamMemberId.trim() === '') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        if (typeof body.name !== 'string' || body.name.trim() === '' || !isValidTeamMemberEmail(body.email)) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        const existingMember = await getTeamMember(supabaseUrl, serviceKey, body.teamMemberId);
+        if (!existingMember || typeof existingMember.name !== 'string') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        await supabaseTableRequest(
+          supabaseUrl,
+          serviceKey,
+          'team_members',
+          'PATCH',
+          { name: body.name, email: body.email },
+          `?id=eq.${encodeURIComponent(body.teamMemberId)}`
+        );
+
+        if (existingMember.name !== body.name) {
+          try {
+            await supabaseTableRequest(
+              supabaseUrl,
+              serviceKey,
+              'tracked_items',
+              'PATCH',
+              { assigned_to: body.name },
+              `?assigned_to=eq.${encodeURIComponent(existingMember.name)}`
+            );
+          } catch (error) {
+            console.error('[app-data] team member assignment propagation failed', {
+              teamMemberId: body.teamMemberId,
+              error: error.message
+            });
+          }
+        }
+
+        await logActivityEvent(supabaseUrl, serviceKey, 'team_member_updated', null, null, {
+          from: existingMember.name,
+          to: body.name
+        });
+
+        return res.status(200).json({ ok: true });
+      }
+
+      case 'teamMember.delete': {
+        if (!isExactBody(body, ['action', 'teamMemberId'])) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        if (typeof body.teamMemberId !== 'string' || body.teamMemberId.trim() === '') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        const existingMember = await getTeamMember(supabaseUrl, serviceKey, body.teamMemberId);
+        if (!existingMember || typeof existingMember.name !== 'string') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        await supabaseTableRequest(
+          supabaseUrl,
+          serviceKey,
+          'team_members',
+          'PATCH',
+          { active: false },
+          `?id=eq.${encodeURIComponent(body.teamMemberId)}`
+        );
+        await logActivityEvent(supabaseUrl, serviceKey, 'team_member_deleted', null, null, {
+          name: existingMember.name
+        });
+
+        return res.status(200).json({ ok: true });
       }
 
       default:

@@ -1339,13 +1339,21 @@
             const addTeamMember = async () => {
                 if (!teamMemberForm.name.trim()) { alert('Please enter a name'); return; }
                 try {
-                    const { error } = await supabase.from('team_members')
-                        .insert({ name: teamMemberForm.name, email: teamMemberForm.email || null, active: true });
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({
+                            action: 'teamMember.create',
+                            name: teamMemberForm.name,
+                            email: teamMemberForm.email || null
+                        })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to add team member');
                     const { data: membersData } = await supabase.from('team_members').select('*').eq('active', true).order('name', { ascending: true });
                     if (membersData) setTeamMembers(membersData);
                     setTeamMemberForm({ name: '', email: '' });
-                    await logActivity('team_member_added', null, null, { name: teamMemberForm.name });
                 } catch (err) { setError('Failed to add team member: ' + err.message); }
             };
 
@@ -1358,18 +1366,26 @@
                 if (!teamMemberForm.name.trim()) { alert('Please enter a name'); return; }
                 try {
                     const oldMember = teamMembers.find(m => m.id === editingTeamMember);
-                    const { error } = await supabase.from('team_members')
-                        .update({ name: teamMemberForm.name, email: teamMemberForm.email || null }).eq('id', editingTeamMember);
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({
+                            action: 'teamMember.update',
+                            teamMemberId: String(editingTeamMember),
+                            name: teamMemberForm.name,
+                            email: teamMemberForm.email || null
+                        })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to update team member');
                     if (oldMember && oldMember.name !== teamMemberForm.name) {
-                        await supabase.from('tracked_items').update({ assigned_to: teamMemberForm.name }).eq('assigned_to', oldMember.name);
                         setItems(items.map(item => item.assignedTo === oldMember.name ? { ...item, assignedTo: teamMemberForm.name } : item));
                     }
                     const { data: membersData } = await supabase.from('team_members').select('*').eq('active', true).order('name', { ascending: true });
                     if (membersData) setTeamMembers(membersData);
                     setEditingTeamMember(null);
                     setTeamMemberForm({ name: '', email: '' });
-                    await logActivity('team_member_updated', null, null, { from: oldMember?.name, to: teamMemberForm.name });
                 } catch (err) { setError('Failed to update team member: ' + err.message); }
             };
 
@@ -1377,11 +1393,16 @@
                 const member = teamMembers.find(m => m.id === memberId);
                 if (!confirm(`Are you sure you want to delete ${member?.name}?`)) return;
                 try {
-                    const { error } = await supabase.from('team_members').update({ active: false }).eq('id', memberId);
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'teamMember.delete', teamMemberId: String(memberId) })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to delete team member');
                     const { data: membersData } = await supabase.from('team_members').select('*').eq('active', true).order('name', { ascending: true });
                     if (membersData) setTeamMembers(membersData);
-                    await logActivity('team_member_deleted', null, null, { name: member?.name });
                 } catch (err) { setError('Failed to delete team member: ' + err.message); }
             };
 
