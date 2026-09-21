@@ -705,7 +705,10 @@ test('config-table RLS keeps anon reads and removes anon writes', () => {
     'agency.add',
     'agency.remove',
     'note.save',
-    'note.delete'
+    'note.delete',
+    'teamMember.create',
+    'teamMember.update',
+    'teamMember.delete'
   ];
   const actionBlock = appData.match(/const ALLOWED_ACTIONS = new Set\(\[([\s\S]*?)\]\);/);
 
@@ -775,6 +778,185 @@ test('team_members email reconciliation is additive and leaves IDs, RLS, and add
   assert.doesNotMatch(versionedMigration, /PRIMARY KEY|DROP\s+CONSTRAINT|ALTER\s+COLUMN\s+id/i);
   assert.doesNotMatch(versionedMigration, /CREATE POLICY|DROP POLICY|ENABLE ROW LEVEL SECURITY|DISABLE ROW LEVEL SECURITY/i);
   assert.doesNotMatch(versionedMigration, /added_at/i);
+});
+
+test('team_members RLS migrations keep only anon SELECT access', () => {
+  const canonicalRls = readRepoText('rls-migration.sql');
+  const versionedMigration = readRepoText('migrations/2026-09-21-tighten-team-members-rls.sql');
+
+  for (const source of [canonicalRls, versionedMigration]) {
+    assert.match(source, /ALTER TABLE team_members ENABLE ROW LEVEL SECURITY;/);
+    assert.match(source, /DROP POLICY IF EXISTS "anon can update team_members" ON team_members;/);
+    assert.match(source, /DROP POLICY IF EXISTS "Allow public delete" ON team_members;/);
+    assert.match(source, /DROP POLICY IF EXISTS "Allow public insert" ON team_members;/);
+    assert.match(source, /DROP POLICY IF EXISTS "Allow public read access" ON team_members;/);
+    assert.match(source, /DROP POLICY IF EXISTS "Allow public update" ON team_members;/);
+    assert.match(source, /CREATE POLICY "anon can read team_members"\s+ON team_members\s+FOR SELECT\s+TO anon\s+USING \(true\);/);
+    assert.doesNotMatch(source, /CREATE POLICY "anon can (?:insert|update|delete) team_members"/);
+    assert.doesNotMatch(source, /CREATE POLICY "Allow public (?:read access|insert|update|delete)"\s+ON team_members/);
+  }
+});
+
+test('api/app-data.js implements opaque-ID team member mutation contracts', async () => {
+  const handler = await importFresh('api/app-data.js');
+  const libSession = await importFreshModule('lib/session.js');
+  const { createSignedSession } = libSession;
+  const originalFetch = global.fetch;
+  const calls = [];
+  let existingMember = { id: 'member-1', name: 'Old Name', email: 'old@example.com', active: true };
+  let failureMode = null;
+
+  global.fetch = async (url, init = {}) => {
+    const call = { url, method: init.method || 'GET', body: init.body ? JSON.parse(init.body) : undefined };
+    calls.push(call);
+    if (failureMode === 'member-fetch' && url.includes('/team_members?id=')) return { ok: false, status: 500 };
+    if (failureMode === 'member-write' && url.includes('/team_members?id=') && call.method === 'PATCH') return { ok: false, status: 500 };
+    if (failureMode === 'create' && url.endsWith('/team_members')) return { ok: false, status: 500 };
+    if (url.includes('/team_members?id=')) return { ok: true, status: 200, json: async () => [existingMember] };
+    if (url.endsWith('/team_members')) return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    if (url.includes('/tracked_items?')) {
+      if (failureMode === 'assignment') return { ok: false, status: 500 };
+      return { ok: true, status: 200, json: async () => ({}) };
+    }
+    if (url.endsWith('/activity_log')) {
+      if (failureMode === 'activity') return { ok: false, status: 500 };
+      return { ok: true, status: 200, json: async () => ({}) };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  let cookie;
+  const invoke = async (body, headers = { cookie }) => {
+    const response = makeRes();
+    await handler({ method: 'POST', headers, body: JSON.stringify(body) }, response);
+    return response;
+  };
+
+  try {
+    await withEnv({
+      SESSION_SECRET: 'app-data-secret',
+      SUPABASE_URL: 'https://example.supabase.co',
+      SUPABASE_SERVICE_KEY: 'service-key'
+    }, async () => {
+      cookie = `dc_tracker_session=${encodeURIComponent(createSignedSession(Date.now() + 60 * 1000))}`;
+      let res = await invoke({ action: 'teamMember.create', name: '  New Name  ', email: '   ' });
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(calls[0].body, { name: '  New Name  ', email: '   ', active: true });
+      assert.deepEqual(calls[1].body, { action: 'team_member_added', item_id: null, item_title: null, details: { name: '  New Name  ' } });
+
+      calls.length = 0;
+      failureMode = 'activity';
+      res = await invoke({ action: 'teamMember.create', name: 'Name', email: null });
+      assert.equal(res.statusCode, 200);
+      failureMode = null;
+
+      for (const body of [
+        { action: 'teamMember.create', name: '   ', email: null },
+        { action: 'teamMember.create', name: 42, email: null },
+        { action: 'teamMember.create', name: 'Name', email: 42 },
+        { action: 'teamMember.create', name: 'Name', email: null, extra: true }
+      ]) {
+        res = await invoke(body);
+        assert.equal(res.statusCode, 400);
+      }
+
+      failureMode = 'create';
+      res = await invoke({ action: 'teamMember.create', name: 'Name', email: null });
+      assert.equal(res.statusCode, 500);
+      assert.equal(res.body.error, 'Service unavailable');
+      assert.doesNotMatch(JSON.stringify(res.body), /service-key|SUPABASE_SERVICE_KEY|Supabase/i);
+      failureMode = null;
+
+      calls.length = 0;
+      existingMember = { id: 'member-1', name: 'Old Name', email: 'old@example.com', active: true };
+      res = await invoke({ action: 'teamMember.update', teamMemberId: '550e8400-e29b-41d4-a716-446655440000', name: 'New Name', email: null });
+      assert.equal(res.statusCode, 200);
+      assert.equal(calls[0].method, 'GET');
+      assert.equal(calls[1].method, 'PATCH');
+      assert.deepEqual(calls[1].body, { name: 'New Name', email: null });
+      assert.match(calls[2].url, /tracked_items\?assigned_to=eq\.Old%20Name$/);
+      assert.deepEqual(calls[2].body, { assigned_to: 'New Name' });
+      assert.deepEqual(calls[3].body, { action: 'team_member_updated', item_id: null, item_title: null, details: { from: 'Old Name', to: 'New Name' } });
+
+      calls.length = 0;
+      res = await invoke({ action: 'teamMember.update', teamMemberId: '42', name: 'Newer Name', email: 'new@example.com' });
+      assert.equal(res.statusCode, 200);
+      assert.equal(calls[0].url, 'https://example.supabase.co/rest/v1/team_members?id=eq.42&select=id,name,email,active');
+
+      calls.length = 0;
+      existingMember = { id: 'member-1', name: 'Newer Name', email: 'new@example.com', active: true };
+      res = await invoke({ action: 'teamMember.update', teamMemberId: '42', name: 'Newer Name', email: '   ' });
+      assert.equal(res.statusCode, 200);
+      assert.equal(calls.some((call) => call.url.includes('/tracked_items?')), false);
+
+      for (const body of [
+        { action: 'teamMember.update', teamMemberId: 42, name: 'Name', email: null },
+        { action: 'teamMember.update', teamMemberId: '   ', name: 'Name', email: null },
+        { action: 'teamMember.update', teamMemberId: '42', name: '   ', email: null },
+        { action: 'teamMember.update', teamMemberId: '42', name: 'Name', email: 42 }
+      ]) {
+        res = await invoke(body);
+        assert.equal(res.statusCode, 400);
+      }
+
+      failureMode = 'assignment';
+      existingMember = { id: 'member-1', name: 'Old Name', email: null, active: true };
+      res = await invoke({ action: 'teamMember.update', teamMemberId: '42', name: 'New Name', email: null });
+      assert.equal(res.statusCode, 200);
+      failureMode = null;
+
+      failureMode = 'member-fetch';
+      res = await invoke({ action: 'teamMember.update', teamMemberId: '42', name: 'New Name', email: null });
+      assert.equal(res.statusCode, 500);
+      assert.equal(res.body.error, 'Service unavailable');
+      failureMode = null;
+
+      existingMember = { id: 'member-1', name: 'Delete Me', email: null, active: true };
+      calls.length = 0;
+      res = await invoke({ action: 'teamMember.delete', teamMemberId: '550e8400-e29b-41d4-a716-446655440000' });
+      assert.equal(res.statusCode, 200);
+      assert.equal(calls[1].method, 'PATCH');
+      assert.deepEqual(calls[1].body, { active: false });
+      assert.equal(calls.some((call) => call.method === 'DELETE'), false);
+      assert.equal(calls.some((call) => call.url.includes('/tracked_items?')), false);
+      assert.deepEqual(calls[2].body, { action: 'team_member_deleted', item_id: null, item_title: null, details: { name: 'Delete Me' } });
+
+      calls.length = 0;
+      failureMode = 'activity';
+      res = await invoke({ action: 'teamMember.delete', teamMemberId: '42' });
+      assert.equal(res.statusCode, 200);
+      failureMode = null;
+
+      for (const body of [
+        { action: 'teamMember.delete', teamMemberId: 42 },
+        { action: 'teamMember.delete', teamMemberId: '   ' },
+        { action: 'teamMember.delete', teamMemberId: '42', extra: true }
+      ]) {
+        res = await invoke(body);
+        assert.equal(res.statusCode, 400);
+      }
+
+      const unauthenticated = await invoke({ action: 'teamMember.delete', teamMemberId: '42' }, {});
+      assert.equal(unauthenticated.statusCode, 401);
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('team member frontend mutations use app-data while reads and unrelated item writes remain direct', () => {
+  const appText = readRepoText('index.html');
+
+  assert.match(appText, /\.from\('team_members'\)\.select\('\*'\)/);
+  assert.doesNotMatch(appText, /from\('team_members'\)\s*\.insert\(/i);
+  assert.doesNotMatch(appText, /from\('team_members'\)\s*\.update\(/i);
+  assert.match(appText, /action:\s*'teamMember\.create'/);
+  assert.match(appText, /action:\s*'teamMember\.update'/);
+  assert.match(appText, /action:\s*'teamMember\.delete'/);
+  assert.match(appText, /teamMemberId:\s*String\(editingTeamMember\)/);
+  assert.match(appText, /teamMemberId:\s*String\(memberId\)/);
+  assert.doesNotMatch(appText, /supabase\.from\('tracked_items'\)\.update\(\{ assigned_to: teamMemberForm\.name \}\)/);
+  assert.match(appText, /supabase\.from\('tracked_items'\)\.update\(\{ assigned_to: newAssignee \}\)/);
 });
 
 test('api/app-data.js accepts and validates note.save and note.delete payloads', async () => {

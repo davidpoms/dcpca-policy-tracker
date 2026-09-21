@@ -24,6 +24,103 @@ Preview was created from the canonical schema without `team_members.email`, whil
 
 Production uses integer member IDs while Preview uses UUID values. The later team-member API slice must treat IDs as opaque values: the frontend should send `teamMemberId: String(memberId)`, and the API may validate only that `teamMemberId` is a non-empty string. No ID-type unification is required for this schema reconciliation.
 
+### team_members mutation slice
+
+Status: IMPLEMENTED in `/api/app-data.js`; the RLS migration is prepared but must not be applied until the rollout checks below pass.
+
+The browser keeps its direct active-member SELECT:
+
+```js
+supabase.from('team_members').select('*').eq('active', true).order('name', { ascending: true })
+```
+
+The browser sends all three mutations through the existing authenticated route. Team-member IDs are opaque: the frontend serializes them with `String(memberId)`, and the API accepts only non-empty strings without UUID or numeric parsing.
+
+#### teamMember.create
+
+- Request: `{ action: 'teamMember.create', name, email }`
+- Exact keys: `action`, `name`, `email`
+- Validation: `name` is a string with non-empty `trim()`; `email` is a string or `null`
+- Write: `POST team_members` with `{ name, email, active: true }`
+- Audit: best-effort `team_member_added` with null `item_id`/`item_title` and `{ name }`
+- Response: `{ ok: true }`
+
+#### teamMember.update
+
+- Request: `{ action: 'teamMember.update', teamMemberId, name, email }`
+- Exact keys: `action`, `teamMemberId`, `name`, `email`
+- Validation: `teamMemberId` is a non-empty string; `name` is a string with non-empty `trim()`; `email` is a string or `null`
+- Server first fetches the existing member by ID to obtain the authoritative old name.
+- Write: `PATCH team_members` with only `{ name, email }`
+- Rename side effect: when the name changes, `PATCH tracked_items` where `assigned_to` exactly equals the old name, setting it to the new name.
+- Assignment propagation failure is logged server-side and remains nonfatal after the team-member update succeeds.
+- No tracked-item update occurs when the name is unchanged.
+- Audit: best-effort `team_member_updated` with null `item_id`/`item_title` and `{ from, to }`
+- Response: `{ ok: true }`
+
+#### teamMember.delete
+
+- Request: `{ action: 'teamMember.delete', teamMemberId }`
+- Exact keys: `action`, `teamMemberId`
+- Validation: `teamMemberId` is a non-empty string; UUID syntax is not required
+- Write: `PATCH team_members` with `{ active: false }`
+- This is a soft-delete. No physical DELETE is issued and existing `tracked_items.assigned_to` values are preserved.
+- Audit: best-effort `team_member_deleted` with null `item_id`/`item_title` and `{ name }`
+- Response: `{ ok: true }`
+
+#### RLS inventories and rollout
+
+Known Preview policies before tightening:
+
+- `anon can read team_members`
+- `anon can update team_members`
+
+Known Production policies before tightening:
+
+- `Allow public delete`
+- `Allow public insert`
+- `Allow public read access`
+- `Allow public update`
+- `anon can read team_members`
+- `anon can update team_members`
+
+The prepared migration `migrations/2026-09-21-tighten-team-members-rls.sql` enables RLS, drops both anon write policies and all four observed legacy public policies, then recreates only `anon can read team_members` for anon SELECT. It does not create anon INSERT, UPDATE, or DELETE policies.
+
+Rollout order:
+
+1. Deploy the runtime/API code while the current RLS policies remain in place.
+2. Test add, edit, rename, and soft-delete in Preview.
+3. Apply the team-members RLS migration in Preview.
+4. Verify direct anon INSERT, UPDATE, and DELETE attempts are blocked.
+5. Re-test the authenticated API mutations.
+6. Repeat in Production only after Preview passes.
+
+Rollback SQL for the common anon UPDATE policy:
+
+```sql
+CREATE POLICY "anon can update team_members"
+  ON team_members
+  FOR UPDATE
+  TO anon
+  USING (true)
+  WITH CHECK (true);
+```
+
+Production legacy-policy rollback SQL, matching the observed policy names and public-role behavior:
+
+```sql
+CREATE POLICY "Allow public read access"
+  ON team_members FOR SELECT TO public USING (true);
+CREATE POLICY "Allow public insert"
+  ON team_members FOR INSERT TO public WITH CHECK (true);
+CREATE POLICY "Allow public update"
+  ON team_members FOR UPDATE TO public USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public delete"
+  ON team_members FOR DELETE TO public USING (true);
+```
+
+These rollback policies intentionally reopen anonymous/public writes and are emergency-only. No primary-key type changes or `added_at` changes are part of this slice.
+
 ### item_notes RLS inventory and rollout
 
 Preview inventory:
