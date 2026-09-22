@@ -1047,25 +1047,20 @@
                 const item = items.find(i => i.id === itemId);
                 if (!item) return;
                 try {
-                    const { error } = await supabase.from('tracked_items').update({ action_status: newStatus }).eq('id', itemId);
-                    if (error) throw error;
-                    setItems(items.map(i => i.id === itemId ? { ...i, actionStatus: newStatus } : i));
-
-                    // Record in bill_status_history so it shows in reports' Recent Updates
-                    const labelMap = {
-                        action_needed: 'Action Needed',
-                        monitor_and_assess: 'Monitor & Assess',
-                        action_completed: 'Action Completed'
-                    };
-                    await supabase.from('bill_status_history').insert({
-                        item_id: itemId,
-                        old_status: labelMap[item.actionStatus] || item.actionStatus,
-                        new_status: labelMap[newStatus] || newStatus,
-                        change_label: `Tracker status changed: ${labelMap[item.actionStatus] || item.actionStatus} → ${labelMap[newStatus] || newStatus}`,
-                        changed_at: new Date().toISOString()
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({
+                            action: 'trackedItem.actionStatus.update', itemId,
+                            itemTitle: item.title, oldStatus: item.actionStatus, newStatus
+                        })
                     });
-
-                    await logActivity('action_status_changed', itemId, item.title, { from: item.actionStatus, to: newStatus });
+                    const data = await response.json();
+                    if (response.ok || data?.trackedItemUpdated === true) {
+                        setItems(items.map(i => i.id === itemId ? { ...i, actionStatus: newStatus } : i));
+                    }
+                    if (!response.ok) throw new Error(data?.error || 'Failed to update action status');
                 } catch (err) { setError('Failed to update action status: ' + err.message); }
             };
 

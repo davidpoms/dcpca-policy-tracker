@@ -718,7 +718,8 @@ test('config-table RLS keeps anon reads and removes anon writes', () => {
     'trackedItem.untrack',
     'trackedItem.manual.create',
     'trackedItem.manual.update',
-    'trackedItem.manual.delete'
+    'trackedItem.manual.delete',
+    'trackedItem.actionStatus.update'
   ];
   const actionBlock = appData.match(/const ALLOWED_ACTIONS = new Set\(\[([\s\S]*?)\]\);/);
 
@@ -966,7 +967,7 @@ test('team member frontend mutations use app-data while reads and unrelated item
   assert.match(appText, /teamMemberId:\s*String\(editingTeamMember\)/);
   assert.match(appText, /teamMemberId:\s*String\(memberId\)/);
   assert.doesNotMatch(appText, /supabase\.from\('tracked_items'\)\.update\(\{ assigned_to: teamMemberForm\.name \}\)/);
-  assert.match(appText, /supabase\.from\('tracked_items'\)\.update\(\{ action_status: newStatus \}\)/);
+  assert.match(appText, /const checkHearingsForTrackedItems = async[\s\S]*?supabase\.from\('tracked_items'\)\.update\(\{\s*hearing_checked_at: now/);
 });
 
 test('api/app-data.js implements the five tracked-item metadata action contracts', async () => {
@@ -1303,7 +1304,12 @@ test('manual-entry functions use app-data while action-status and hearing writer
     assert.match(block[1], new RegExp(`action: 'trackedItem\\.manual\\.${action}'`));
     if (name === 'deleteManualEntry') assert.match(block[1], /confirm\('Are you sure you want to delete this entry\? This cannot be undone\.'\)/);
   }
-  assert.match(appText, /const updateActionStatus = async[\s\S]*?supabase\.from\('tracked_items'\)\.update/);
+  const actionStatusBlock = appText.match(/const updateActionStatus = async \([^)]*\) => \{([\s\S]*?)\n            \};/);
+  assert.ok(actionStatusBlock);
+  assert.match(actionStatusBlock[1], /action: 'trackedItem\.actionStatus\.update'/);
+  assert.doesNotMatch(actionStatusBlock[1], /supabase\.from\('(tracked_items|bill_status_history)'\)|logActivity\(/);
+  assert.match(actionStatusBlock[1], /response\.ok \|\| data\?\.trackedItemUpdated === true/);
+  assert.match(actionStatusBlock[1], /setItems\(items\.map/);
   assert.match(appText, /const checkHearingsForTrackedItems = async[\s\S]*?supabase\.from\('tracked_items'\)\.update/);
 });
 
@@ -1386,6 +1392,74 @@ test('manual-entry API preserves payloads, audit behavior, auth and generic fail
         assert.equal(res.statusCode, 500);
         assert.deepEqual(res.body, { error: 'Service unavailable' });
         failure = null;
+      }
+    });
+  } finally { global.fetch = originalFetch; }
+});
+
+test('action-status API preserves ordered writes and partial-success failures', async () => {
+  const handler = await importFresh('api/app-data.js');
+  const { createSignedSession } = await importFreshModule('lib/session.js');
+  const originalFetch = global.fetch;
+  const calls = [];
+  let failTable = null;
+  global.fetch = async (url, init = {}) => {
+    calls.push({ url, method: init.method, headers: init.headers, body: init.body ? JSON.parse(init.body) : undefined });
+    return { ok: !url.includes(`/${failTable}`), status: 500 };
+  };
+  const request = { action: 'trackedItem.actionStatus.update', itemId: 'B26/123',
+    itemTitle: 'A bill', oldStatus: 'action_needed', newStatus: 'monitor_and_assess' };
+  const invoke = async (body, headers) => {
+    const res = makeRes();
+    await handler({ method: 'POST', headers, body: JSON.stringify(body) }, res);
+    return res;
+  };
+  try {
+    await withEnv({ SESSION_SECRET: 'status-secret', SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_KEY: 'service-key' }, async () => {
+      const headers = { cookie: `dc_tracker_session=${encodeURIComponent(createSignedSession(Date.now() + 60000))}` };
+      assert.equal((await invoke(request, {})).statusCode, 401);
+      for (const invalid of [
+        { ...request, extra: true }, { ...request, itemId: '' }, { ...request, itemTitle: 1 },
+        { ...request, oldStatus: null }, { ...request, newStatus: 1 },
+        Object.fromEntries(Object.entries(request).filter(([key]) => key !== 'newStatus'))
+      ]) assert.equal((await invoke(invalid, headers)).statusCode, 400);
+
+      calls.length = 0;
+      assert.equal((await invoke(request, headers)).statusCode, 200);
+      assert.equal(calls.length, 3);
+      assert.deepEqual(calls[0], {
+        url: 'https://example.supabase.co/rest/v1/tracked_items?id=eq.B26%2F123',
+        method: 'PATCH', headers: calls[0].headers, body: { action_status: 'monitor_and_assess' }
+      });
+      assert.equal(calls[0].headers.Authorization, 'Bearer service-key');
+      assert.equal(calls[1].url, 'https://example.supabase.co/rest/v1/bill_status_history');
+      assert.equal(calls[1].method, 'POST');
+      assert.deepEqual({ ...calls[1].body, changed_at: undefined }, {
+        item_id: 'B26/123', old_status: 'Action Needed', new_status: 'Monitor & Assess',
+        change_label: 'Tracker status changed: Action Needed → Monitor & Assess', changed_at: undefined
+      });
+      assert.match(calls[1].body.changed_at, /^\d{4}-\d{2}-\d{2}T/);
+      assert.deepEqual(calls[2].body, { action: 'action_status_changed', item_id: 'B26/123',
+        item_title: 'A bill', details: { from: 'action_needed', to: 'monitor_and_assess' } });
+
+      calls.length = 0;
+      assert.equal((await invoke({ ...request, oldStatus: 'custom', newStatus: 'other' }, headers)).statusCode, 200);
+      assert.equal(calls[1].body.change_label, 'Tracker status changed: custom → other');
+      calls.length = 0;
+      assert.equal((await invoke({ ...request, newStatus: 'action_completed' }, headers)).statusCode, 200);
+      assert.equal(calls[1].body.new_status, 'Action Completed');
+
+      for (const [table, status, count, partial] of [
+        ['tracked_items', 500, 1, undefined],
+        ['bill_status_history', 500, 2, true],
+        ['activity_log', 200, 3, undefined]
+      ]) {
+        calls.length = 0;
+        failTable = table;
+        const res = await invoke(request, headers);
+        assert.equal(res.statusCode, status);
+        assert.equal(calls.length, count);
+        if (status === 500) assert.deepEqual(res.body, { error: 'Service unavailable', ...(partial ? { trackedItemUpdated: true } : {}) });
       }
     });
   } finally { global.fetch = originalFetch; }

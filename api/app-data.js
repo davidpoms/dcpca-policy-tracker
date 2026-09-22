@@ -23,7 +23,8 @@ const ALLOWED_ACTIONS = new Set([
   'trackedItem.untrack',
   'trackedItem.manual.create',
   'trackedItem.manual.update',
-  'trackedItem.manual.delete'
+  'trackedItem.manual.delete',
+  'trackedItem.actionStatus.update'
 ]);
 
 function isExactBody(body, allowedKeys) {
@@ -484,6 +485,42 @@ export default async function handler(req, res) {
           to: body.newPriority
         });
 
+        return res.status(200).json({ ok: true });
+      }
+
+      case 'trackedItem.actionStatus.update': {
+        if (!isExactBody(body, ['action', 'itemId', 'itemTitle', 'oldStatus', 'newStatus']) ||
+            typeof body.itemId !== 'string' || body.itemId.trim() === '' ||
+            typeof body.itemTitle !== 'string' || typeof body.oldStatus !== 'string' ||
+            typeof body.newStatus !== 'string') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        await supabaseTableRequest(supabaseUrl, serviceKey, 'tracked_items', 'PATCH',
+          { action_status: body.newStatus }, `?id=eq.${encodeURIComponent(body.itemId)}`);
+
+        const labelMap = {
+          action_needed: 'Action Needed',
+          monitor_and_assess: 'Monitor & Assess',
+          action_completed: 'Action Completed'
+        };
+        const oldLabel = labelMap[body.oldStatus] || body.oldStatus;
+        const newLabel = labelMap[body.newStatus] || body.newStatus;
+        try {
+          await supabaseTableRequest(supabaseUrl, serviceKey, 'bill_status_history', 'POST', {
+            item_id: body.itemId,
+            old_status: oldLabel,
+            new_status: newLabel,
+            change_label: `Tracker status changed: ${oldLabel} → ${newLabel}`,
+            changed_at: new Date().toISOString()
+          });
+        } catch (error) {
+          console.error('[app-data] action-status history insert failed', { action, error: error.message });
+          return res.status(500).json({ error: 'Service unavailable', trackedItemUpdated: true });
+        }
+
+        await logActivityEvent(supabaseUrl, serviceKey, 'action_status_changed',
+          body.itemId, body.itemTitle, { from: body.oldStatus, to: body.newStatus });
         return res.status(200).json({ ok: true });
       }
 
