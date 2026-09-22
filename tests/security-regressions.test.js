@@ -766,6 +766,43 @@ test('bill-status history RLS keeps anon SELECT and removes browser write polici
   assert.doesNotMatch(readRepoText('index.html'), /\.from\('bill_status_history'\)\s*\.\s*insert\s*\(/);
 });
 
+test('tracked_items and activity_log RLS allow only anon reads after browser writes migrate', () => {
+  const canonical = readRepoText('rls-migration.sql');
+  const versioned = readRepoText('migrations/2026-09-21-tighten-tracked-items-activity-log-rls.sql');
+  assert.match(versioned, /BEGIN;[\s\S]*COMMIT;/);
+  for (const sql of [canonical, versioned]) {
+    for (const table of ['tracked_items', 'activity_log']) {
+      assert.match(sql, new RegExp(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY;`));
+      assert.match(sql, new RegExp(`CREATE POLICY "anon can read ${table}"\\s+ON ${table} FOR SELECT TO anon USING \\(true\\);`));
+      const tablePolicies = [...sql.matchAll(new RegExp(`CREATE POLICY "([^"]+)"\\s+ON ${table}\\s+FOR (\\w+)`, 'gi'))];
+      assert.deepEqual(tablePolicies.map(([, name, command]) => [name, command.toUpperCase()]),
+        [[`anon can read ${table}`, 'SELECT']]);
+      for (const policy of ['Allow public read access', 'Allow public insert',
+        ...(table === 'tracked_items' ? ['Allow public update', 'Allow public delete'] : []),
+        `anon can read ${table}`, `anon can insert ${table}`,
+        ...(table === 'tracked_items' ? [`anon can update ${table}`, `anon can delete ${table}`] : [])]) {
+        assert.match(versioned, new RegExp(`DROP POLICY IF EXISTS "${policy}" ON ${table};`));
+      }
+    }
+  }
+  const creates = [...versioned.matchAll(/CREATE POLICY "([^"]+)"\s+ON (tracked_items|activity_log)/g)]
+    .map(([, name, table]) => `${table}:${name}`);
+  assert.deepEqual(creates, [
+    'activity_log:anon can read activity_log', 'tracked_items:anon can read tracked_items'
+  ]);
+
+  const html = readRepoText('index.html');
+  assert.match(html, /\.from\('tracked_items'\)\.select/);
+  assert.match(html, /\.from\('activity_log'\)\.select/);
+  assert.doesNotMatch(html, /\.from\('tracked_items'\)\s*\.\s*(?:insert|update|delete)\s*\(/);
+  assert.doesNotMatch(html, /\.from\('activity_log'\)\s*\.\s*insert\s*\(/);
+  const appData = readRepoText('api/app-data.js');
+  assert.match(appData, /'trackedItem\.hearing\.persist'/);
+  assert.match(appData, /'trackedItem\.activity\.detected'/);
+  assert.match(appData, /supabaseTableRequest\(supabaseUrl, serviceKey, 'tracked_items', 'PATCH'/);
+  assert.match(readRepoText('api/check-hearings.js'), /await sbPatch\('tracked_items', item\.id/);
+});
+
 test('item_notes RLS migration keeps anon reads and removes anon/public writes', () => {
   const canonicalRls = readRepoText('rls-migration.sql');
   const versionedMigration = readRepoText('migrations/2026-09-18-tighten-item-notes-rls.sql');

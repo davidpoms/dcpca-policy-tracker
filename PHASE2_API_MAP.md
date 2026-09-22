@@ -155,6 +155,10 @@ The canonical `tracked_items` and `activity_log` RLS policies have intentionally
 
 No direct browser `tracked_items` or `activity_log` INSERT, UPDATE, or DELETE remains in `index.html`. Browser SELECTs remain.
 
+### Final tracked_items and activity_log RLS tightening
+
+Browser mutation migration is complete for both tables. `migrations/2026-09-21-tighten-tracked-items-activity-log-rls.sql` is prepared, not applied. It runs in a transaction, keeps RLS enabled, removes Preview's anon write policies and Production's listed legacy PUBLIC policies, then recreates only `anon can read tracked_items` and `anon can read activity_log` (`FOR SELECT TO anon USING (true)`). The canonical `rls-migration.sql` has the same read-only browser policy target. Direct browser SELECTs continue; app-data and the server-side hearing cron retain service-role writes. Apply and verify in Preview before Production as a separate rollout.
+
 ### Hearing persistence slice
 
 Status: IMPLEMENTED in `/api/app-data.js` with two explicit actions. LIMS fetching, hearing selection, parsing, timelines, per-item continuation, progress, delay, and React state remain in the browser. The cron route is unchanged.
