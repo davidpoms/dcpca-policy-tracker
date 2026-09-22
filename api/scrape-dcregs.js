@@ -175,6 +175,14 @@ export function classifyDcRegsResponse(html, status, targetUrl = '') {
   const metadata = isNoticeDetail ? parseNoticeMetadata(text, parsedTarget) : null;
   const expectedNoticeIdMatched = expectedNoticeId ? metadata?.noticeId?.toUpperCase() === expectedNoticeId && new RegExp(escapeRegex(expectedNoticeId), 'i').test(text) : null;
   const coreNoticeFields = metadata ? [metadata.registerCategory, metadata.agency, metadata.registerIssue, metadata.publishDate].filter(Boolean).length : 0;
+  const parsedMetadataFieldsPresent = metadata ? Object.fromEntries([
+    'noticeId', 'title', 'registerCategory', 'subCategory', 'agency', 'registerIssue', 'issueDate', 'volume', 'issueNumber', 'publishDate'
+  ].map(field => [field, metadata[field] !== null && metadata[field] !== undefined && metadata[field] !== ''])) : null;
+  const parsedMetadata = metadata ? Object.fromEntries(Object.keys(parsedMetadataFieldsPresent).map(field => [field, metadata[field] ?? null])) : null;
+  const noticeMetadataDiagnostics = isNoticeDetail ? {
+    expectedNoticeId, expectedNoticeIdMatched, parsedMetadataFieldsPresent,
+    parsedCoreFieldCount: coreNoticeFields, parsedMetadata
+  } : null;
   let structuralValidationType = 'dc-register-discovery';
   let structuralValid = markers.dcRegsTitle && markers.aspNet && (markers.issueBrowse || /(?:IssueID|CategoryID|NoticeId)=/i.test(text));
   if (isHomepage) {
@@ -186,7 +194,7 @@ export function classifyDcRegsResponse(html, status, targetUrl = '') {
   }
   const realContent = ok && !empty && structuralValid;
   const kind = realContent ? 'real-content' : !ok ? 'http-error' : empty ? 'empty' : blockSignals.length ? 'challenge-or-block' : generic ? 'generic-error' : 'unexpected-content';
-  return { realContent, kind, structuralValidationType, structuralValid, blockSignals, expectedNoticeId, expectedNoticeIdMatched, markers };
+  return { realContent, kind, structuralValidationType, structuralValid, blockSignals, expectedNoticeId, expectedNoticeIdMatched, noticeMetadataDiagnostics, markers };
 }
 
 export function parseNoticeMetadata(html, source = '') {
@@ -254,8 +262,12 @@ async function documentProbe(url, key, counts) {
 async function discoverIssue(home, key, counts) {
   const base = { success: false, issueDate: ISSUE_DATE, issueIdentified: false, issueId: null, targetIssueUrl: null,
     identification: [], browseUrls: [], targetIssueUrls: [], categoryUrls: [], categoryUrlsAccepted: 0, categoryUrlsRejected: 0,
-    targetPagesFetched: 0, noticesFromTargetIssue: 0, categories: [], noticeCount: 0, sampleNotices: [] };
+    targetPagesFetched: 0, noticesFromTargetIssue: 0, categories: [], noticeCount: 0, sampleNotices: [],
+    browseControlCandidates: [], browseControlPageSignals: { hasViewState: false, hasEventValidation: false, hasEventTarget: false } };
   if (!home) return { ...base, reason: 'No validated homepage response' };
+  const browseControls = inspectBrowseControls(home.body, home.targetUrl);
+  base.browseControlCandidates = browseControls.candidates;
+  base.browseControlPageSignals = browseControls.pageSignals;
   const initial = issueLinks(home.body, home.targetUrl);
   const browse = browseLinks(home.body, home.targetUrl);
   const browsePages = [];
@@ -291,6 +303,53 @@ function browseLinks(html, base) {
   const action = match(html, /<form\b[^>]*action\s*=\s*["']([^"']+)["']/i); if (action && /Issue(?:Category)?List\.aspx/i.test(action)) raw.push(action);
   return validate(raw, base);
 }
+
+export function inspectBrowseControls(html, baseUrl = HOME) {
+  const text = String(html || '');
+  const candidates = [];
+  const elementPattern = /<(input|button|a)\b([^>]*)(?:>([\s\S]*?)<\/\1>)?/gi;
+  for (const element of text.matchAll(elementPattern)) {
+    const tag = element[1].toLowerCase();
+    const attrs = element[2] || '';
+    const value = attribute(attrs, 'value');
+    const label = clean(element[3] || value || attribute(attrs, 'title') || attribute(attrs, 'aria-label'));
+    if (!/browse through dcr issues/i.test(label + ' ' + value)) continue;
+    const hrefRaw = attribute(attrs, 'href');
+    const onclick = attribute(attrs, 'onclick');
+    const postback = onclick?.match(/__doPostBack\(\s*['"]([A-Za-z0-9_$:.\-]+)['"]\s*,\s*['"]([A-Za-z0-9_$:.\-]*)['"]\s*\)/i);
+    const windowOpen = onclick?.match(/window\.open\(\s*['"]([^'"]+)['"]/i);
+    const before = text.slice(0, element.index);
+    const formStart = before.lastIndexOf('<form');
+    const formEnd = before.lastIndexOf('</form>');
+    const formTag = formStart > formEnd ? text.slice(formStart, text.indexOf('>', formStart) + 1) : '';
+    const formActionRaw = match(formTag, /action\s*=\s*["']([^"']+)["']/i);
+    candidates.push({
+      tag, id: safeAttribute(attribute(attrs, 'id')), name: safeAttribute(attribute(attrs, 'name')),
+      type: safeAttribute(attribute(attrs, 'type')), value: safeAttribute(value), text: safeAttribute(clean(element[3])),
+      href: hrefRaw ? allowedDcRegsUrl(hrefRaw, baseUrl) : null,
+      formAction: formActionRaw ? allowedDcRegsUrl(formActionRaw, baseUrl) : null,
+      onclick: {
+        hasDoPostBack: /__doPostBack/i.test(onclick || ''), eventTarget: postback?.[1] || null,
+        eventArgument: postback?.[2] || null, hasWindowOpen: /window\.open/i.test(onclick || ''),
+        allowedWindowOpenUrl: windowOpen ? allowedDcRegsUrl(windowOpen[1], baseUrl) : null
+      }
+    });
+    if (candidates.length === 5) break;
+  }
+  return {
+    candidates,
+    pageSignals: {
+      hasViewState: /name\s*=\s*["']__VIEWSTATE["']/i.test(text),
+      hasEventValidation: /name\s*=\s*["']__EVENTVALIDATION["']/i.test(text),
+      hasEventTarget: /name\s*=\s*["']__EVENTTARGET["']/i.test(text)
+    }
+  };
+}
+
+function attribute(attrs, name) {
+  return String(attrs || '').match(new RegExp(`\\b${name}\\s*=\\s*(["'])([\\s\\S]*?)\\1`, 'i'))?.[2] || null;
+}
+function safeAttribute(value) { return value ? clean(value).slice(0, 200) || null : null; }
 function issueLinks(html, base) {
   const raw = []; const mechanisms = []; const date = /9\/18\/2026|September\s+18,?\s+2026/i;
   for (const a of anchors(html)) if (date.test(a.text + ' ' + a.attrs)) { if (a.href && !/^javascript:/i.test(a.href)) { raw.push(a.href); mechanisms.push('link'); } const popup = match(a.attrs, /(?:window\.open|open)\s*\(\s*["']([^"']+)/i); if (popup) { raw.push(popup); mechanisms.push('onclick'); } }

@@ -113,6 +113,43 @@ test('notice validation rejects challenge shells, wrong IDs, and weak generic HT
   assert.equal(weak.realContent, false); assert.equal(weak.kind, 'unexpected-content');
 });
 
+test('notice metadata diagnostics report only bounded public fields', () => {
+  const result = route.classifyDcRegsResponse(n539, 200, 'https://dcregs.dc.gov/Common/NoticeDetail.aspx?NoticeId=N146539');
+  assert.deepEqual(result.noticeMetadataDiagnostics.parsedMetadataFieldsPresent, {
+    noticeId: true, title: true, registerCategory: true, subCategory: false, agency: true,
+    registerIssue: true, issueDate: true, volume: true, issueNumber: true, publishDate: true
+  });
+  assert.equal(result.noticeMetadataDiagnostics.parsedCoreFieldCount, 4);
+  assert.equal(result.noticeMetadataDiagnostics.parsedMetadata.registerCategory, 'Public Hearings');
+  assert.equal(result.noticeMetadataDiagnostics.parsedMetadata.noticeId, 'N146539');
+  const diagnosticJson = JSON.stringify(result.noticeMetadataDiagnostics);
+  assert.doesNotMatch(diagnosticJson, /<html|<table|<script|response body/i);
+  assert.deepEqual(Object.keys(result.noticeMetadataDiagnostics.parsedMetadata), [
+    'noticeId', 'title', 'registerCategory', 'subCategory', 'agency', 'registerIssue', 'issueDate', 'volume', 'issueNumber', 'publishDate'
+  ]);
+});
+
+test('browse controls expose safe structured navigation diagnostics only', () => {
+  const controls = `<html><body><form action="/Common/DCR/Issues/IssueList.aspx">
+    <input name="__VIEWSTATE" value="large-secret-state"><input name="__EVENTVALIDATION" value="large-validation"><input name="__EVENTTARGET">
+    <input id="browseInput" name="ctl00$browse" type="button" value="Browse through DCR Issues" onclick="__doPostBack('ctl00$browse','open')">
+    <button id="browseButton" onclick="window.open('https://evil.test/issues')">Browse through DCR Issues</button>
+    <a href="javascript:alert(1)">Browse through DCR Issues</a>
+  </form>${Array.from({ length: 6 }, (_, i) => `<button id="extra${i}">Browse through DCR Issues</button>`).join('')}</body></html>`;
+  const result = route.inspectBrowseControls(controls, 'https://www.dcregs.dc.gov/');
+  assert.equal(result.candidates.length, 5);
+  assert.deepEqual(result.pageSignals, { hasViewState: true, hasEventValidation: true, hasEventTarget: true });
+  assert.equal(result.candidates[0].tag, 'input');
+  assert.equal(result.candidates[0].formAction, 'https://www.dcregs.dc.gov/Common/DCR/Issues/IssueList.aspx');
+  assert.deepEqual(result.candidates[0].onclick, {
+    hasDoPostBack: true, eventTarget: 'ctl00$browse', eventArgument: 'open', hasWindowOpen: false, allowedWindowOpenUrl: null
+  });
+  assert.equal(result.candidates[1].onclick.hasWindowOpen, true);
+  assert.equal(result.candidates[1].onclick.allowedWindowOpenUrl, null);
+  assert.equal(result.candidates[2].href, null);
+  assert.doesNotMatch(JSON.stringify(result), /large-secret-state|large-validation|alert\(1\)|evil\.test/);
+});
+
 test('external redirect is rejected without following it', async () => {
   const calls = [];
   await withEnvFetch({ CRON_SECRET: secret }, async (url, options) => {

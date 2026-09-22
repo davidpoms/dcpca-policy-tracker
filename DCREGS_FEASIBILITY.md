@@ -20,4 +20,6 @@ Evaluate the `direct`, `scrapingBee`, `knownNoticeParsing`, `viewText`, `issueDi
 
 Content validation is structural and page-specific. Broad block phrases can occur inside otherwise valid ASP.NET scripts or templates, so the classifier reports them as diagnostic `blockSignals` without overriding strong homepage or matching Notice Detail structure. ScrapingBee remains a fallback only when direct retrieval fails structural validation.
 
+Notice Detail validation reports field-presence and parsed public-metadata diagnostics without returning HTML. Homepage diagnostics also report up to five sanitized controls associated with **Browse through DCR Issues**, structured postback/window-open indicators, allowed same-site navigation targets, and the presence—but never the values—of ASP.NET state fields. These diagnostics do not implement ASP.NET POST navigation or change viability conclusions.
+
 This spike does **not** establish that ingestion is viable unless the September 18, 2026 issue is positively identified, a target issue or descended category page is fetched, and at least one notice is enumerated from that target chain. Generic browse-page notices and successful parsing of the two known individual notices do not count. No production workflow, tracked item, candidate record, report, schedule, or database table is created or modified.
