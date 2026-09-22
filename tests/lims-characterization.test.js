@@ -191,7 +191,7 @@ test('cron status, title, hearing, fallback, history and email decisions are cha
         [['Introduced', 'Passed'], ['Bill', 'Bill (CANCELLED)'], ['Passed', 'Passed']]);
       assert.equal(history[0].body.change_label, null);
       assert.match(history[1].body.change_label, /^Title updated:/);
-      assert.match(history[2].body.change_label, /^Hearing Scheduled: Public Hearing on Mar 20$/);
+      assert.equal(history[2].body.change_label, 'Hearing Scheduled: Public Hearing on Mar 20, 2027');
       assert.equal(patch.body.title, 'Bill (CANCELLED)');
       assert.equal(patch.body.status, 'Passed');
       assert.equal(patch.body.next_hearing_date, '2027-03-20T12:00:00.000Z');
