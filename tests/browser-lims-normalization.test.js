@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const normalization = fs.readFileSync(path.join(root, 'frontend/lims-normalization.js'), 'utf8');
 const fixtures = JSON.parse(fs.readFileSync(path.join(root, 'tests/fixtures/lims-characterization.json'), 'utf8'));
 const plain = value => JSON.parse(JSON.stringify(value));
 
@@ -16,14 +17,12 @@ class FixedDate extends Date {
 }
 
 function browserHelpers() {
-  const start = html.indexOf('const normalizeCommittees = (value) =>');
-  const end = html.indexOf('function App()', start);
   const isNewStart = html.indexOf('const isNewItem = (dateString) =>');
   const isNewEnd = html.indexOf('const quickSearchByCategory =', isNewStart);
-  assert.ok(start >= 0 && end > start && isNewStart >= 0 && isNewEnd > isNewStart);
-  const context = { Date: FixedDate };
-  vm.runInNewContext(`${html.slice(start, end)}\n${html.slice(isNewStart, isNewEnd)}\n` +
-    'globalThis.helpers = { normalizeCommittees, parseMembers, transformLimsSearchItem, isNewItem };', context);
+  assert.ok(isNewStart >= 0 && isNewEnd > isNewStart);
+  const context = { Date: FixedDate, window: {} };
+  vm.runInNewContext(`${normalization}\n${html.slice(isNewStart, isNewEnd)}\n` +
+    'globalThis.helpers = { ...window.DCPCAFrontend, isNewItem };', context);
   return context.helpers;
 }
 
@@ -65,7 +64,7 @@ test('both browser searches and hearing checks use shared local helpers without 
   assert.ok(refresh);
   assert.ok(quick);
   for (const block of [refresh[1], quick[1]]) {
-    assert.match(block, /normalizeCommittees\.transformLimsSearchItem\(leg, isNewItem\)/);
+    assert.match(block, /window\.DCPCAFrontend\.transformLimsSearchItem\(leg, isNewItem\)/);
     assert.doesNotMatch(block, /const parseMembers =/);
   }
   assert.match(refresh[1], /setItems\(\[\.\.\.existingTrackedItems, \.\.\.mergedItems\]\)/);
@@ -75,10 +74,14 @@ test('both browser searches and hearing checks use shared local helpers without 
   for (const name of ['checkHearingsForTrackedItems', 'checkHearingForItem']) {
     const block = html.match(new RegExp(`const ${name} = async \\([^)]*\\) => \\{([\\s\\S]*?)\\n            \\};`));
     assert.ok(block, name);
-    assert.match(block[1], /parseMembers\(details\.introducers\)/);
-    assert.match(block[1], /parseMembers\(details\.coIntroducers\)/);
+    assert.match(block[1], /window\.DCPCAFrontend\.parseMembers\(details\.introducers\)/);
+    assert.match(block[1], /window\.DCPCAFrontend\.parseMembers\(details\.coIntroducers\)/);
     assert.doesNotMatch(block[1], /const parseMembers =/);
   }
-  assert.equal((html.match(/const parseMembers =/g) || []).length, 1);
-  assert.equal((html.match(/const transformLimsSearchItem =/g) || []).length, 1);
+  assert.match(html, /<script src="frontend\/lims-normalization\.js"><\/script>\s*<script type="text\/babel">/);
+  for (const name of ['normalizeCommittees', 'parseMembers', 'transformLimsSearchItem']) {
+    assert.doesNotMatch(html, new RegExp(`const ${name} =`));
+    assert.equal((normalization.match(new RegExp(`const ${name} =`, 'g')) || []).length, 1);
+  }
+  assert.doesNotMatch(html, /normalizeCommittees\.transformLimsSearchItem/);
 });

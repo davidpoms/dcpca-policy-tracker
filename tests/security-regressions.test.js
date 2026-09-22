@@ -1900,15 +1900,16 @@ test('repository guardrails keep note mutations behind the authenticated API and
 
 test('frontend committee normalization keeps array data safe at the render boundary', () => {
   const appText = readRepoText('index.html');
+  const normalization = readRepoText('frontend/lims-normalization.js');
 
-  assert.match(appText, /const normalizeCommittees = \(value\) => \{/);
-  assert.match(appText, /if \(!text \|\| text === 'null'\) return \[\];/);
-  assert.match(appText, /JSON\.parse\(text\)/);
-  assert.match(appText, /split\(';'/);
-  assert.match(appText, /filter\(Boolean\)/);
+  assert.match(normalization, /const normalizeCommittees = \(value\) => \{/);
+  assert.match(normalization, /if \(!text \|\| text === 'null'\) return \[\];/);
+  assert.match(normalization, /JSON\.parse\(text\)/);
+  assert.match(normalization, /split\(';'/);
+  assert.match(normalization, /filter\(Boolean\)/);
   assert.doesNotMatch(appText, /committees:\s*item\.committees\s*\|\|\s*\[\]/);
-  assert.match(appText, /committees:\s*normalizeCommittees\(item\.committees\)/);
-  assert.match(appText, /const committees = normalizeCommittees\(leg\.referredToCommittees\);/);
+  assert.match(appText, /committees:\s*window\.DCPCAFrontend\.normalizeCommittees\(item\.committees\)/);
+  assert.match(normalization, /const committees = normalizeCommittees\(leg\.referredToCommittees\);/);
 });
 
 test('server-side JavaScript files in /api and /lib pass node syntax checks', async () => {

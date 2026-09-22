@@ -24,9 +24,9 @@ function browser() {
   const isNewStart = html.indexOf('const isNewItem = (dateString) =>');
   const isNewEnd = html.indexOf('const quickSearchByCategory =', isNewStart);
   assert.ok(start >= 0 && end > start && isNewStart >= 0 && isNewEnd > isNewStart);
-  const context = { Date: FixedDate };
-  vm.runInNewContext(`${html.slice(start, end)}\n${html.slice(isNewStart, isNewEnd)}\n` +
-    'globalThis.parsers = { extractNextHearing, extractLatestActivityDate, extractActivityTimeline, normalizeCommittees, isNewItem };', context);
+  const context = { Date: FixedDate, window: {} };
+  vm.runInNewContext(`${read('frontend/lims-normalization.js')}\n${html.slice(start, end)}\n${html.slice(isNewStart, isNewEnd)}\n` +
+    'globalThis.parsers = { extractNextHearing, extractLatestActivityDate, extractActivityTimeline, isNewItem, frontend: window.DCPCAFrontend };', context);
   return { parsers: context.parsers, html };
 }
 
@@ -36,7 +36,7 @@ function browserSearchItem(leg) {
   const end = html.indexOf('const existingTrackedItems =', start);
   assert.ok(start >= 0 && end > start);
   const context = { Date: FixedDate, allLegislation: [leg],
-    normalizeCommittees: parsers.normalizeCommittees, isNewItem: parsers.isNewItem };
+    window: { DCPCAFrontend: parsers.frontend }, isNewItem: parsers.isNewItem };
   vm.runInNewContext(`${html.slice(start, end)}\nglobalThis.result = transformedItems[0];`, context);
   return plain(context.result);
 }
