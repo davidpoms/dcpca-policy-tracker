@@ -78,7 +78,7 @@ test('both browser searches and hearing checks use shared local helpers without 
     assert.match(block[1], /window\.DCPCAFrontend\.parseMembers\(details\.coIntroducers\)/);
     assert.doesNotMatch(block[1], /const parseMembers =/);
   }
-  assert.match(html, /<script src="frontend\/lims-normalization\.js"><\/script>\s*<script src="frontend\/lims-activity\.js"><\/script>\s*<script src="frontend\/lims-hearings\.js"><\/script>\s*<script type="text\/babel">/);
+  assert.match(html, /<script src="frontend\/lims-normalization\.js"><\/script>\s*<script src="frontend\/lims-activity\.js"><\/script>\s*<script src="frontend\/lims-hearings\.js"><\/script>\s*<script src="frontend\/api-client\.js"><\/script>\s*<script type="text\/babel">/);
   for (const name of ['normalizeCommittees', 'parseMembers', 'transformLimsSearchItem']) {
     assert.doesNotMatch(html, new RegExp(`const ${name} =`));
     assert.equal((normalization.match(new RegExp(`const ${name} =`, 'g')) || []).length, 1);

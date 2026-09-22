@@ -4,6 +4,8 @@
 
 The browser tests evaluate date-dependent `isNewItem` source from `index.html`, normalization from `frontend/lims-normalization.js`, latest-activity and timeline logic from `frontend/lims-activity.js`, and browser hearing selection from `frontend/lims-hearings.js` inside a small VM. All three same-origin classic scripts load before the inline Babel entry and expose helpers through `window.DCPCAFrontend`. The cron tests evaluate the separate `api/check-hearings.js` source with mocked fetch and mail. API contracts are unchanged. The test clock is 2026-09-21 12:00 UTC; the test worker uses UTC for formatted dates. The cron delay is skipped only in the test harness.
 
+Phase 3 API client Stage 1 adds `frontend/api-client.js` after the three LIMS scripts and before Babel. Its `window.DCPCAFrontend.appDataRequest(payload)` performs only the existing `/api/app-data` JSON POST and returns the raw response. Every caller in `index.html` retains its own response parsing, failure handling, and React state timing, including action-status partial success and best-effort hearing/activity calls.
+
 Fixtures that protect intentional differences:
 
 | Fixture | Browser behavior | Cron behavior |
