@@ -12,6 +12,8 @@ Frontend modularization Stage 4A makes `index.html` the page shell and moves its
 
 The first React presentation extraction keeps `HearingReportPanel` in `frontend/app.jsx`. `DCPolicyTracker` still owns hearing state, ordering, persistence, progress, and the visibility condition; the panel receives only hearing data, the ordered upcoming list, checking state, and recheck/close callbacks.
 
+`ActivityLogModal` is the next presentation component in `frontend/app.jsx`. It receives only the ordered `activityLog` entries and an `onClose` callback. `DCPolicyTracker` retains the modal condition, activity state, and the existing `loadActivityLog()` call when the header button opens it.
+
 Fixtures that protect intentional differences:
 
 | Fixture | Browser behavior | Cron behavior |

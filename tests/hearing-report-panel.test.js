@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const app = fs.readFileSync(path.join(root, 'frontend/app.jsx'), 'utf8').replace(/\r\n/g, '\n');
-const componentMatch = app.match(/function HearingReportPanel\(\{([^}]+)\}\) \{([\s\S]*?)\n        \}\n\n        function DCPolicyTracker/);
+const componentMatch = app.match(/function HearingReportPanel\(\{([^}]+)\}\) \{([\s\S]*?)\n        \}\n\n        function ActivityLogModal/);
 
 test('HearingReportPanel is a presentation component with exactly five props', () => {
   assert.ok(componentMatch);

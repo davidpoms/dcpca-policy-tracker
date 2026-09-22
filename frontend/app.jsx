@@ -188,6 +188,34 @@
             );
         }
 
+        function ActivityLogModal({ activityLog, onClose }) {
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-screen overflow-y-auto">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xl font-semibold">Activity Log</h3>
+                            <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-2xl">×</button>
+                        </div>
+                        <div className="space-y-2">
+                            {activityLog.map(log => (
+                                <div key={log.id} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <span className="font-semibold text-sm">{log.action.replace(/_/g, ' ').toUpperCase()}</span>
+                                            {log.item_title && <span className="text-sm text-gray-600 ml-2">- {log.item_title}</span>}
+                                            {log.details && Object.keys(log.details).length > 0 && <div className="text-xs text-gray-500 mt-1">{JSON.stringify(log.details)}</div>}
+                                        </div>
+                                        <span className="text-xs text-gray-400">{new Date(log.created_at).toLocaleString()}</span>
+                                    </div>
+                                </div>
+                            ))}
+                            {activityLog.length === 0 && <div className="text-center py-8 text-gray-500">No activity recorded yet</div>}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
         function DCPolicyTracker({ onLogout }) {
             // ─── App state ────────────────────────────────────────────────────────────────
             const [items, setItems] = useState([]);
@@ -2063,29 +2091,10 @@
                     )}
 
                     {showActivityLog && (
-                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                            <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-screen overflow-y-auto">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h3 className="text-xl font-semibold">Activity Log</h3>
-                                    <button onClick={() => setShowActivityLog(false)} className="text-gray-500 hover:text-gray-700 text-2xl">×</button>
-                                </div>
-                                <div className="space-y-2">
-                                    {activityLog.map(log => (
-                                        <div key={log.id} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                                            <div className="flex justify-between items-start">
-                                                <div>
-                                                    <span className="font-semibold text-sm">{log.action.replace(/_/g, ' ').toUpperCase()}</span>
-                                                    {log.item_title && <span className="text-sm text-gray-600 ml-2">- {log.item_title}</span>}
-                                                    {log.details && Object.keys(log.details).length > 0 && <div className="text-xs text-gray-500 mt-1">{JSON.stringify(log.details)}</div>}
-                                                </div>
-                                                <span className="text-xs text-gray-400">{new Date(log.created_at).toLocaleString()}</span>
-                                            </div>
-                                        </div>
-                                    ))}
-                                    {activityLog.length === 0 && <div className="text-center py-8 text-gray-500">No activity recorded yet</div>}
-                                </div>
-                            </div>
-                        </div>
+                        <ActivityLogModal
+                            activityLog={activityLog}
+                            onClose={() => setShowActivityLog(false)}
+                        />
                     )}
 
                     {showEmailPreview && (
