@@ -6,6 +6,8 @@ const LIMIT = 2_000_000;
 const TIMEOUT = 12_000;
 const CAPS = { browse: 2, issues: 2, categories: 6, samples: 10 };
 const FETCH_CLEANUP = Symbol('fetchCleanup');
+const MAX_WEBFORMS_STATE_BYTES = 250_000;
+const MAX_COOKIE_BYTES = 4_096;
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -16,7 +18,7 @@ export default async function handler(req, res) {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.headers?.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: 'Unauthorized' });
 
-  const counts = { totalHttpRequests: 0, scrapingBeeRequests: 0, renderedScrapingBeeRequests: 0 };
+  const counts = { totalHttpRequests: 0, scrapingBeeRequests: 0, renderedScrapingBeeRequests: 0, browseSubmissionRequests: 0 };
   const key = process.env.SCRAPINGBEE_API_KEY;
   const probes = await Promise.all([HOME, ...NOTICES].map(url => probeFallback(url, key, counts)));
   const pages = probes.map(p => p.success).filter(Boolean);
@@ -69,7 +71,8 @@ async function probe(value, mode, key, counts, renderJs, timeout = TIMEOUT) {
       targetUrl, status: result.response.status, finalUrl: result.finalUrl,
       contentType: result.response.headers?.get?.('content-type') || null,
       characterLength: body.length, byteLength: data.byteLength,
-      contentValidation: classifyDcRegsResponse(body, result.response.status, targetUrl), body
+      contentValidation: classifyDcRegsResponse(body, result.response.status, targetUrl), body,
+      _cookies: mode === 'direct' ? boundedCookies(result.response) : null
     };
   } catch (error) {
     const kind = error.code === 'SIZE' ? 'response-too-large' : error.code === 'URL' ? 'url-rejected' : error.name === 'AbortError' ? 'timeout' : 'request-error';
@@ -78,7 +81,7 @@ async function probe(value, mode, key, counts, renderJs, timeout = TIMEOUT) {
 }
 
 export async function probeDcRegsForTest(value, { timeoutMs = TIMEOUT } = {}) {
-  return probe(value, 'direct', null, { totalHttpRequests: 0, scrapingBeeRequests: 0, renderedScrapingBeeRequests: 0 }, false, timeoutMs);
+  return probe(value, 'direct', null, { totalHttpRequests: 0, scrapingBeeRequests: 0, renderedScrapingBeeRequests: 0, browseSubmissionRequests: 0 }, false, timeoutMs);
 }
 
 async function directRequest(value, counts, timeout) {
@@ -310,23 +313,105 @@ async function documentProbe(url, key, counts) {
   } catch (error) { return { status: null, finalUrl: url, contentType: null, bytesRead: 0, actualDocument: false, error: safeError(error, key) }; }
 }
 
+export function extractBrowseWebFormsState(html, baseUrl = HOME) {
+  const forms = [...String(html || '').matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/gi)];
+  for (const form of forms) {
+    const formAttrs = form[1]; const formBody = form[2];
+    if ((attribute(formAttrs, 'method') || '').toLowerCase() !== 'post') continue;
+    const button = [...formBody.matchAll(/<input\b([^>]*)>/gi)].find(item =>
+      attribute(item[1], 'id') === 'MainContent_btndcrgo'
+      && attribute(item[1], 'name') === 'ctl00$MainContent$btndcrgo'
+      && /^submit$/i.test(attribute(item[1], 'type') || '')
+      && attribute(item[1], 'value') === 'Go');
+    if (!button) continue;
+    const action = allowedDcRegsUrl(attribute(formAttrs, 'action') || '/', baseUrl);
+    if (action !== HOME) return { valid: false, reason: 'Browse form action rejected', action: null, fields: null, encodedBytes: 0 };
+    const fields = {};
+    for (const input of formBody.matchAll(/<input\b([^>]*)>/gi)) {
+      const attrs = input[1]; const name = attribute(attrs, 'name');
+      if ((attribute(attrs, 'type') || '').toLowerCase() !== 'hidden' || !/^__[A-Za-z0-9_]+$/.test(name || '')) continue;
+      fields[name] = decodeHtmlEntities(attribute(attrs, 'value') || '');
+    }
+    if (!('__VIEWSTATE' in fields) || !('__EVENTVALIDATION' in fields)) return { valid: false, reason: 'Required WebForms state missing', action: null, fields: null, encodedBytes: 0 };
+    const params = new URLSearchParams(fields); params.set('ctl00$MainContent$btndcrgo', 'Go');
+    const encodedBytes = new TextEncoder().encode(params.toString()).byteLength;
+    if (encodedBytes > MAX_WEBFORMS_STATE_BYTES) return { valid: false, reason: 'WebForms state exceeded size limit', action: null, fields: null, encodedBytes };
+    return { valid: true, reason: null, action, fields, encodedBytes };
+  }
+  return { valid: false, reason: 'Browse form not found', action: null, fields: null, encodedBytes: 0 };
+}
+
+async function submitBrowseForm(home, counts) {
+  const diagnostic = { attempted: false, success: false, status: null, finalUrl: null, structuralValid: false, targetIssueCandidateCount: 0, targetIssueIdentified: false };
+  const state = extractBrowseWebFormsState(home.body, home.finalUrl || home.targetUrl);
+  if (!state.valid) return { diagnostic: { ...diagnostic, reason: state.reason }, page: null };
+  diagnostic.attempted = true; counts.browseSubmissionRequests++;
+  const params = new URLSearchParams(state.fields); params.set('ctl00$MainContent$btndcrgo', 'Go');
+  const headers = { 'User-Agent': 'DCPCA-DCRegs-Feasibility/1.0', 'Content-Type': 'application/x-www-form-urlencoded' };
+  if (home._cookies && new URL(home.finalUrl || home.targetUrl).origin === new URL(state.action).origin) headers.Cookie = home._cookies;
+  try {
+    const result = await constrainedBrowsePost(state.action, params.toString(), headers, counts, TIMEOUT);
+    const data = await readBoundedResponse(result.response, LIMIT);
+    const body = new TextDecoder().decode(data.bytes);
+    const contentValidation = classifyDcRegsResponse(body, result.response.status, result.finalUrl);
+    const success = result.response.status >= 200 && result.response.status < 300 && contentValidation.structuralValid;
+    return {
+      diagnostic: { ...diagnostic, success, status: result.response.status, finalUrl: result.finalUrl,
+        structuralValid: contentValidation.structuralValid, reason: success ? null : 'Browse submission response failed structural validation' },
+      page: success ? { mode: 'direct-webforms-post', targetUrl: result.finalUrl, status: result.response.status,
+        finalUrl: result.finalUrl, contentType: result.response.headers?.get?.('content-type') || null,
+        characterLength: body.length, byteLength: data.byteLength, contentValidation, body } : null
+    };
+  } catch (error) {
+    return { diagnostic: { ...diagnostic, reason: safeError(error) }, page: null };
+  }
+}
+
+async function constrainedBrowsePost(action, body, headers, counts, timeout) {
+  if (allowedDcRegsUrl(action) !== HOME) throw coded('Browse form action rejected', 'URL');
+  let url = HOME; let options = { method: 'POST', redirect: 'manual', headers, body };
+  for (let hop = 0; hop <= 3; hop++) {
+    const response = await timedFetch(url, options, counts, timeout);
+    if (![301, 302, 303, 307, 308].includes(response.status)) return { response, finalUrl: url };
+    response[FETCH_CLEANUP]?.();
+    if (hop === 3) throw coded('Redirect limit exceeded', 'URL');
+    const next = allowedDcRegsUrl(response.headers?.get?.('location'), url);
+    if (!next) throw coded('Redirect target rejected', 'URL');
+    url = next;
+    options = { method: 'GET', redirect: 'manual', headers: { 'User-Agent': 'DCPCA-DCRegs-Feasibility/1.0' } };
+  }
+}
+
+function boundedCookies(response) {
+  const raw = typeof response.headers?.getSetCookie === 'function' ? response.headers.getSetCookie() : [response.headers?.get?.('set-cookie')].filter(Boolean);
+  const pairs = raw.slice(0, 8).map(value => String(value).split(';', 1)[0].trim())
+    .filter(value => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+=[^\r\n;]*$/.test(value) && new TextEncoder().encode(value).byteLength <= 1024);
+  const cookie = pairs.join('; ');
+  return cookie && new TextEncoder().encode(cookie).byteLength <= MAX_COOKIE_BYTES ? cookie : null;
+}
+
 async function discoverIssue(home, key, counts) {
   const base = { success: false, issueDate: ISSUE_DATE, issueIdentified: false, issueId: null, targetIssueUrl: null,
     identification: [], browseUrls: [], targetIssueUrls: [], categoryUrls: [], categoryUrlsAccepted: 0, categoryUrlsRejected: 0,
     targetPagesFetched: 0, noticesFromTargetIssue: 0, categories: [], noticeCount: 0, sampleNotices: [],
-    browseControlCandidates: [], browseControlPageSignals: { hasViewState: false, hasEventValidation: false, hasEventTarget: false } };
+    browseControlCandidates: [], browseControlPageSignals: { hasViewState: false, hasEventValidation: false, hasEventTarget: false },
+    browseSubmission: { attempted: false, success: false, status: null, finalUrl: null, structuralValid: false, targetIssueCandidateCount: 0, targetIssueIdentified: false } };
   if (!home) return { ...base, reason: 'No validated homepage response' };
   const browseControls = inspectBrowseControls(home.body, home.targetUrl);
   base.browseControlCandidates = browseControls.candidates;
   base.browseControlPageSignals = browseControls.pageSignals;
+  const submission = await submitBrowseForm(home, counts);
+  base.browseSubmission = submission.diagnostic;
   const initial = issueLinks(home.body, home.targetUrl);
   const browse = browseLinks(home.body, home.targetUrl);
-  const browsePages = [];
+  const browsePages = submission.page ? [submission.page] : [];
   for (const url of browse.accepted.slice(0, CAPS.browse)) { const p = await validatedPage(url, key, counts); if (p) browsePages.push(p); }
   const discoveries = [{ ...initial, source: 'homepage' }, ...browsePages.map(p => ({ ...issueLinks(p.body, p.targetUrl), source: p.targetUrl }))];
   const targetUrls = [...new Set(discoveries.flatMap(d => d.accepted))].slice(0, CAPS.issues);
   const issueId = discoveries.map(d => d.issueId).find(Boolean) || null;
   const identified = Boolean(issueId || targetUrls.length === 1);
+  base.browseSubmission.targetIssueCandidateCount = submission.page ? issueLinks(submission.page.body, submission.page.targetUrl).accepted.length : 0;
+  base.browseSubmission.targetIssueIdentified = Boolean(submission.page && (issueId || base.browseSubmission.targetIssueCandidateCount === 1));
   const identification = discoveries.filter(d => d.issueId || d.accepted.length).map(d => ({ source: d.source, mechanisms: d.mechanisms }));
   if (!identified) return { ...base, browseUrls: browse.accepted.slice(0, CAPS.browse), identification, reason: 'September 18, 2026 issue was not positively identified' };
   const targetPages = [];
@@ -431,7 +516,7 @@ function noticeLinks(html, base) {
 function anchors(html) { return [...String(html || '').matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)].map(m => ({ attrs: m[1], href: match(m[1], /href\s*=\s*["']([^"']+)/i) || '', text: clean(m[2]) })); }
 function validate(values, base, cap = Infinity) { const accepted = []; let rejected = 0; for (const value of values) { const url = allowedDcRegsUrl(value, base); if (!url) rejected++; else if (!accepted.includes(url) && accepted.length < cap) accepted.push(url); } return { accepted, rejected }; }
 function unique(items, key) { const seen = new Set(); return items.filter(item => { const k = key(item); return k && !seen.has(k) && seen.add(k); }); }
-function expose({ body, ...safe }) { return safe; }
+function expose({ body, _cookies, ...safe }) { return safe; }
 function failed(kind, error) { return { mode: null, targetUrl: null, status: null, finalUrl: null, contentType: null, characterLength: 0, byteLength: 0, contentValidation: { realContent: false, kind, markers: {} }, error, body: '' }; }
 function coded(message, code) { const error = new Error(message); error.code = code; return error; }
 function safeError(error, key) { let text = error instanceof Error ? error.message : 'Request failed'; text = text.replace(/https:\/\/app\.scrapingbee\.com\/[^\s"']*/gi, '[scrapingbee-url-redacted]').replace(/api_key=[^&\s]+/gi, 'api_key=[redacted]'); if (key) text = text.split(key).join('[redacted]'); return text.slice(0, 300); }

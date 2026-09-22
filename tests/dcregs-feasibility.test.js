@@ -21,6 +21,12 @@ const home = `<html><body><input name="__VIEWSTATE" value="state">District of Co
 <a href="/issues.aspx?IssueID=73-38">September 18, 2026</a></body></html>`;
 const issue = `<html><body>District of Columbia Register<a href="/category.aspx?IssueID=73-38&CategoryID=1">Rules</a></body></html>`;
 const category = `<html><body>District of Columbia Register<a href="/Common/NoticeDetail.aspx?NoticeId=N150000">Target notice</a></body></html>`;
+function webformsHome(action = '/', viewState = 'view-state-secret') {
+  return `<html><body><input name="__VIEWSTATE" value="shell">District of Columbia Register Search District of Columbia Register Browse through DCR Issues
+  <form method="post" action="${action}"><input type="hidden" name="__VIEWSTATE" value="${viewState}">
+  <input type="hidden" name="__VIEWSTATEGENERATOR" value="generator-secret"><input type="hidden" name="__EVENTVALIDATION" value="validation-secret">
+  <input id="MainContent_btndcrgo" name="ctl00$MainContent$btndcrgo" type="submit" value="Go"></form></body></html>`;
+}
 function visibleNoticeHtml({ id, category: registerCategory, subCategory = null, title }) {
   return `<html><head><title>- DCRegs</title><style>.x{content:'Register Category : Fake';}</style><script>const fake='Agency Name : Wrong';</script></head><body>
   <div>District of Columbia Register</div><div>Notice ID : ${id} Details</div><div>${title}</div>
@@ -162,6 +168,82 @@ test('existing structured metadata remains the first choice', () => {
   assert.equal(parsed.agency, 'Zoning, Office of');
 });
 
+test('extracts only bounded hidden WebForms state for the exact browse form', () => {
+  const state = route.extractBrowseWebFormsState(webformsHome());
+  assert.equal(state.valid, true); assert.equal(state.action, 'https://www.dcregs.dc.gov/');
+  assert.deepEqual(state.fields, { __VIEWSTATE: 'view-state-secret', __VIEWSTATEGENERATOR: 'generator-secret', __EVENTVALIDATION: 'validation-secret' });
+  assert.equal('ctl00$MainContent$btndcrgo' in state.fields, false);
+
+  assert.equal(route.extractBrowseWebFormsState(webformsHome('https://evil.test/')).valid, false);
+  assert.equal(route.extractBrowseWebFormsState(webformsHome('/', 'x'.repeat(260000))).valid, false);
+});
+
+test('constrained browse POST identifies the target issue without exposing state or cookies', async () => {
+  const calls = [];
+  const browsePage = '<html><body>District of Columbia Register Browse through DCR Issues<a href="/issues.aspx?IssueID=73-38">September 18, 2026</a></body></html>';
+  await withEnvFetch({ CRON_SECRET: secret }, async (url, options = {}) => {
+    const value = String(url); calls.push({ url: value, options });
+    if (value === 'https://www.dcregs.dc.gov/' && options.method === 'POST') return response(browsePage, { url: value });
+    if (value === 'https://www.dcregs.dc.gov/') {
+      const result = response(webformsHome(), { url: value });
+      result.headers.getSetCookie = () => ['ASP.NET_SessionId=cookie-secret; Path=/; Secure', 'oversized=' + 'x'.repeat(5000)];
+      return result;
+    }
+    return standardFetch()(url, options);
+  }, async () => {
+    const out = res(); await route.default(request(), out);
+    const post = calls.find(call => call.options.method === 'POST');
+    assert.equal(post.url, 'https://www.dcregs.dc.gov/');
+    assert.equal(post.options.headers['Content-Type'], 'application/x-www-form-urlencoded');
+    assert.equal(post.options.headers.Cookie, 'ASP.NET_SessionId=cookie-secret');
+    assert.match(post.options.body, /ctl00%24MainContent%24btndcrgo=Go/);
+    assert.doesNotMatch(post.options.body, /__EVENTTARGET/);
+    assert.equal(out.body.issueDiscovery.browseSubmission.attempted, true);
+    assert.equal(out.body.issueDiscovery.browseSubmission.success, true);
+    assert.equal(out.body.issueDiscovery.browseSubmission.targetIssueIdentified, true);
+    assert.equal(out.body.conclusion.issueEnumerationViable, true);
+    assert.ok(out.body.requestCounts.totalHttpRequests <= 16);
+    assert.equal(out.body.requestCounts.browseSubmissionRequests, 1);
+    const json = JSON.stringify(out.body);
+    assert.doesNotMatch(json, /view-state-secret|generator-secret|validation-secret|cookie-secret|ctl00%24MainContent/);
+  });
+});
+
+test('successful browse POST without target date does not make enumeration viable', async () => {
+  const noTarget = '<html><body>District of Columbia Register Browse through DCR Issues<a href="/issues.aspx?IssueID=other">September 11, 2026</a></body></html>';
+  await withEnvFetch({ CRON_SECRET: secret }, async (url, options = {}) => {
+    if (String(url) === 'https://www.dcregs.dc.gov/' && options.method === 'POST') return response(noTarget, { url: String(url) });
+    if (String(url) === 'https://www.dcregs.dc.gov/') return response(webformsHome(), { url: String(url) });
+    return standardFetch()(url, options);
+  }, async () => {
+    const out = res(); await route.default(request(), out);
+    assert.equal(out.body.issueDiscovery.browseSubmission.success, true);
+    assert.equal(out.body.issueDiscovery.browseSubmission.targetIssueIdentified, false);
+    assert.equal(out.body.issueDiscovery.success, false); assert.equal(out.body.conclusion.issueEnumerationViable, false);
+  });
+});
+
+test('browse POST rejects external redirects and oversized responses', async () => {
+  const calls = [];
+  await withEnvFetch({ CRON_SECRET: secret }, async (url, options = {}) => {
+    calls.push(String(url));
+    if (String(url) === 'https://www.dcregs.dc.gov/' && options.method === 'POST') return response('', { status: 302, headers: { location: 'https://evil.test/' } });
+    if (String(url) === 'https://www.dcregs.dc.gov/') return response(webformsHome(), { url: String(url) });
+    return standardFetch()(url, options);
+  }, async () => {
+    const out = res(); await route.default(request(), out);
+    assert.equal(calls.some(url => url.includes('evil.test')), false); assert.equal(out.body.issueDiscovery.browseSubmission.success, false);
+  });
+  await withEnvFetch({ CRON_SECRET: secret }, async (url, options = {}) => {
+    if (String(url) === 'https://www.dcregs.dc.gov/' && options.method === 'POST') return response('', { headers: { 'content-length': '2000001' } });
+    if (String(url) === 'https://www.dcregs.dc.gov/') return response(webformsHome(), { url: String(url) });
+    return standardFetch()(url, options);
+  }, async () => {
+    const out = res(); await route.default(request(), out); assert.equal(out.body.issueDiscovery.browseSubmission.success, false);
+    assert.match(out.body.issueDiscovery.browseSubmission.reason, /size limit/);
+  });
+});
+
 test('browse controls expose safe structured navigation diagnostics only', () => {
   const controls = `<html><body><form action="/Common/DCR/Issues/IssueList.aspx">
     <input name="__VIEWSTATE" value="large-secret-state"><input name="__EVENTVALIDATION" value="large-validation"><input name="__EVENTTARGET">
@@ -209,7 +291,8 @@ test('strict target issue chain drives viability and generic browse notices do n
 });
 
 test('discovery and returned samples obey reduced caps', async () => {
-  const manyHome = `<html><body>District of Columbia Register Browse through DCR Issues${Array.from({ length: 5 }, (_, i) => `<a href="/browse${i}.aspx">DCR Issues</a>`).join('')}<a href="/issue0.aspx?IssueID=73-38">September 18, 2026</a><a href="/issue1.aspx?IssueID=73-38">9/18/2026</a><a href="/issue2.aspx?IssueID=73-38">9/18/2026</a></body></html>`;
+  const discoveryLinks = `${Array.from({ length: 5 }, (_, i) => `<a href="/browse${i}.aspx">DCR Issues</a>`).join('')}<a href="/issue0.aspx?IssueID=73-38">September 18, 2026</a><a href="/issue1.aspx?IssueID=73-38">9/18/2026</a><a href="/issue2.aspx?IssueID=73-38">9/18/2026</a>`;
+  const manyHome = webformsHome().replace('</body>', `${discoveryLinks}</body>`);
   const manyCategories = `<html><body>District of Columbia Register${Array.from({ length: 9 }, (_, i) => `<a href="/cat${i}.aspx?CategoryID=${i}">C${i}</a>`).join('')}</body></html>`;
   const manyNotices = `<html><body>District of Columbia Register${Array.from({ length: 15 }, (_, i) => `<a href="/Common/NoticeDetail.aspx?NoticeId=N${2000 + i}">N${i}</a>`).join('')}</body></html>`;
   const calls = [];
@@ -220,6 +303,7 @@ test('discovery and returned samples obey reduced caps', async () => {
     assert.ok(out.body.issueDiscovery.browseUrls.length <= 2); assert.ok(out.body.issueDiscovery.targetIssueUrls.length <= 2);
     assert.ok(out.body.issueDiscovery.categoryUrls.length <= 6); assert.ok(out.body.issueDiscovery.sampleNotices.length <= 10);
     assert.ok(calls.filter(url => /cat\d/.test(url)).length <= 6);
+    assert.equal(out.body.requestCounts.totalHttpRequests, 16);
   });
 });
 
@@ -259,7 +343,10 @@ test('stalled fetch is abortable and proxy URLs and secrets never enter JSON', a
 
 test('route is read-only and API function count remains bounded', () => {
   const source = fs.readFileSync(routePath, 'utf8');
-  assert.doesNotMatch(source, /SUPABASE|tracked_items|\.from\(|rest\/v1|method:\s*['"](?:POST|PUT|PATCH|DELETE)['"]/i);
+  assert.doesNotMatch(source, /SUPABASE|tracked_items|\.from\(|rest\/v1|method:\s*['"](?:PUT|PATCH|DELETE)['"]/i);
+  assert.equal((source.match(/method:\s*'POST'/g) || []).length, 1);
+  assert.match(source, /constrainedBrowsePost[\s\S]*timedFetch/);
+  assert.doesNotMatch(source, /export\s+(?:async\s+)?function\s+\w*Post/i);
   assert.doesNotMatch(source, /console\.(?:log|error|warn)/);
   assert.ok(fs.readdirSync(path.join(root, 'api')).filter(name => name.endsWith('.js')).length <= 12);
 });
