@@ -153,9 +153,16 @@ The browser still performs direct SELECTs. It now sends these five mutations thr
 
 The canonical `tracked_items` and `activity_log` RLS policies have intentionally not changed. Hearing/activity enrichment remains a browser writer. RLS cannot be tightened until those direct writers are migrated.
 
-Remaining mutation families:
+Remaining browser mutation paths: hearing persistence in `checkHearingsForTrackedItems()` and `checkHearingForItem()`, plus their `hearings_checked` activity logging.
 
-- hearing/activity enrichment
+### Detected-item activity slice
+
+Status: IMPLEMENTED in `/api/app-data.js` as `trackedItem.activity.detected`.
+
+- Exact request: `{ action, itemId, newStatus, activitySummary, lastCheckedAt }`. The browser retains its existing ISO timestamp generation. The server requires a non-empty string item ID and string values for the other fields.
+- The server PATCHes only `last_status`, `has_new_activity: true`, `activity_summary`, and `last_checked_at` by exact item ID, then best-effort logs `activity_detected` with the item ID, null item title, and `{ summary: activitySummary }`.
+- A tracked-item failure returns a generic client error and skips the audit. An audit failure does not fail the action. The browser still logs an update error to the console and does not update local state in this function; the calling refresh flow retains its current local-state timing.
+- `checkHearingsForTrackedItems()` and `checkHearingForItem()` still directly PATCH `tracked_items`, and `hearings_checked` still uses the browser activity logger. `tracked_items` UPDATE and `activity_log` INSERT RLS cannot yet be tightened.
 
 ### Manual-entry lifecycle slice
 

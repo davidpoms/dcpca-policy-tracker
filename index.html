@@ -1066,12 +1066,16 @@
 
             const updateItemActivity = async (itemId, newStatus, activitySummary) => {
                 try {
-                    const { error } = await supabase.from('tracked_items').update({
-                        last_status: newStatus, has_new_activity: true,
-                        activity_summary: activitySummary, last_checked_at: new Date().toISOString()
-                    }).eq('id', itemId);
-                    if (error) throw error;
-                    await logActivity('activity_detected', itemId, null, { summary: activitySummary });
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({
+                            action: 'trackedItem.activity.detected', itemId, newStatus,
+                            activitySummary, lastCheckedAt: new Date().toISOString()
+                        })
+                    });
+                    if (!response.ok) throw new Error('Failed to update item activity');
                 } catch (err) { console.error('Error updating item activity:', err); }
             };
 

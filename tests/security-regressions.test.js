@@ -719,7 +719,8 @@ test('config-table RLS keeps anon reads and removes anon writes', () => {
     'trackedItem.manual.create',
     'trackedItem.manual.update',
     'trackedItem.manual.delete',
-    'trackedItem.actionStatus.update'
+    'trackedItem.actionStatus.update',
+    'trackedItem.activity.detected'
   ];
   const actionBlock = appData.match(/const ALLOWED_ACTIONS = new Set\(\[([\s\S]*?)\]\);/);
 
@@ -1483,6 +1484,68 @@ test('action-status API preserves ordered writes and partial-success failures', 
       }
     });
   } finally { global.fetch = originalFetch; }
+});
+
+test('detected activity API preserves exact PATCH, audit, auth and failure behavior', async () => {
+  const handler = await importFresh('api/app-data.js');
+  const { createSignedSession } = await importFreshModule('lib/session.js');
+  const originalFetch = global.fetch;
+  const calls = [];
+  let failure = null;
+  global.fetch = async (url, init = {}) => {
+    calls.push({ url, method: init.method, headers: init.headers, body: init.body ? JSON.parse(init.body) : undefined });
+    return { ok: !(failure === 'primary' && url.includes('/tracked_items') || failure === 'audit' && url.includes('/activity_log')), status: 500 };
+  };
+  const body = { action: 'trackedItem.activity.detected', itemId: 'B26/123',
+    newStatus: 'Introduced', activitySummary: 'Status changed', lastCheckedAt: '2026-09-21T12:00:00.000Z' };
+  const invoke = async (value, headers) => {
+    const res = makeRes();
+    await handler({ method: 'POST', headers, body: JSON.stringify(value) }, res);
+    return res;
+  };
+  try {
+    await withEnv({ SESSION_SECRET: 'activity-secret', SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_KEY: 'service-key' }, async () => {
+      const headers = { cookie: `dc_tracker_session=${encodeURIComponent(createSignedSession(Date.now() + 60000))}` };
+      assert.equal((await invoke(body, {})).statusCode, 401);
+      for (const invalid of [
+        { ...body, itemId: '' }, { ...body, itemId: 42 }, { ...body, newStatus: null },
+        { ...body, activitySummary: null }, { ...body, lastCheckedAt: 42 },
+        { ...body, extra: true }, Object.fromEntries(Object.entries(body).filter(([key]) => key !== 'activitySummary'))
+      ]) assert.equal((await invoke(invalid, headers)).statusCode, 400);
+      calls.length = 0;
+      assert.equal((await invoke(body, headers)).statusCode, 200);
+      assert.equal(calls.length, 2);
+      assert.equal(calls[0].url, 'https://example.supabase.co/rest/v1/tracked_items?id=eq.B26%2F123');
+      assert.equal(calls[0].method, 'PATCH');
+      assert.equal(calls[0].headers.Authorization, 'Bearer service-key');
+      assert.deepEqual(calls[0].body, { last_status: 'Introduced', has_new_activity: true,
+        activity_summary: 'Status changed', last_checked_at: '2026-09-21T12:00:00.000Z' });
+      assert.deepEqual(calls[1].body, { action: 'activity_detected', item_id: 'B26/123',
+        item_title: null, details: { summary: 'Status changed' } });
+      calls.length = 0;
+      failure = 'audit';
+      assert.equal((await invoke(body, headers)).statusCode, 200);
+      assert.equal(calls.length, 2);
+      calls.length = 0;
+      failure = 'primary';
+      const failed = await invoke(body, headers);
+      assert.equal(failed.statusCode, 500);
+      assert.deepEqual(failed.body, { error: 'Service unavailable' });
+      assert.equal(calls.length, 1);
+    });
+  } finally { global.fetch = originalFetch; }
+});
+
+test('detected activity uses app-data while hearing browser writes and audit remain', () => {
+  const html = readRepoText('index.html');
+  const block = html.match(/const updateItemActivity = async \([^)]*\) => \{([\s\S]*?)\n            \};/);
+  assert.ok(block);
+  assert.match(block[1], /action: 'trackedItem\.activity\.detected'/);
+  assert.doesNotMatch(block[1], /supabase\.from\('tracked_items'\)|logActivity\(/);
+  for (const name of ['checkHearingsForTrackedItems', 'checkHearingForItem']) {
+    assert.match(html, new RegExp(`const ${name} = async[\\s\\S]*?supabase\\.from\\('tracked_items'\\)\\.update\\(`));
+  }
+  assert.match(html, /await logActivity\('hearings_checked', null, null, \{ checked: trackedIds\.length, withUpcoming: withHearings \}\)/);
 });
 
 test('api/app-data.js accepts and validates note.save and note.delete payloads', async () => {

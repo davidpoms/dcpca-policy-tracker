@@ -24,7 +24,8 @@ const ALLOWED_ACTIONS = new Set([
   'trackedItem.manual.create',
   'trackedItem.manual.update',
   'trackedItem.manual.delete',
-  'trackedItem.actionStatus.update'
+  'trackedItem.actionStatus.update',
+  'trackedItem.activity.detected'
 ]);
 
 function isExactBody(body, allowedKeys) {
@@ -521,6 +522,25 @@ export default async function handler(req, res) {
 
         await logActivityEvent(supabaseUrl, serviceKey, 'action_status_changed',
           body.itemId, body.itemTitle, { from: body.oldStatus, to: body.newStatus });
+        return res.status(200).json({ ok: true });
+      }
+
+      case 'trackedItem.activity.detected': {
+        if (!isExactBody(body, ['action', 'itemId', 'newStatus', 'activitySummary', 'lastCheckedAt']) ||
+            typeof body.itemId !== 'string' || body.itemId.trim() === '' ||
+            typeof body.newStatus !== 'string' || typeof body.activitySummary !== 'string' ||
+            typeof body.lastCheckedAt !== 'string') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        await supabaseTableRequest(supabaseUrl, serviceKey, 'tracked_items', 'PATCH', {
+          last_status: body.newStatus,
+          has_new_activity: true,
+          activity_summary: body.activitySummary,
+          last_checked_at: body.lastCheckedAt
+        }, `?id=eq.${encodeURIComponent(body.itemId)}`);
+        await logActivityEvent(supabaseUrl, serviceKey, 'activity_detected',
+          body.itemId, null, { summary: body.activitySummary });
         return res.status(200).json({ ok: true });
       }
 
