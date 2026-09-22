@@ -60,7 +60,7 @@ test('browser LIMS helpers load before Babel and hearing checks use the extracte
   const html = read('index.html');
   const activity = read('frontend/lims-activity.js');
   const hearings = read('frontend/lims-hearings.js');
-  assert.match(html, /<script src="frontend\/lims-normalization\.js"><\/script>\s*<script src="frontend\/lims-activity\.js"><\/script>\s*<script src="frontend\/lims-hearings\.js"><\/script>\s*<script type="text\/babel">/);
+  assert.match(html, /<script src="frontend\/lims-normalization\.js"><\/script>\s*<script src="frontend\/lims-activity\.js"><\/script>\s*<script src="frontend\/lims-hearings\.js"><\/script>\s*<script src="frontend\/api-client\.js"><\/script>\s*<script type="text\/babel">/);
   for (const name of ['extractLatestActivityDate', 'extractActivityTimeline']) {
     assert.match(activity, new RegExp(`function ${name}\\(details\\)`));
     assert.match(activity, new RegExp(`window\\.DCPCAFrontend\\.${name} = ${name};`));
