@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS tracked_items (
   has_new_activity        boolean DEFAULT false,
   activity_summary        text,
   last_checked_at         timestamptz,
+  hearing_checked_at      timestamptz,
   tracked_at              timestamptz DEFAULT now(),
   notice_id               text,
   register_issue          text,

@@ -159,6 +159,8 @@ No direct browser `tracked_items` or `activity_log` INSERT, UPDATE, or DELETE re
 
 Status: IMPLEMENTED in `/api/app-data.js` with two explicit actions. LIMS fetching, hearing selection, parsing, timelines, per-item continuation, progress, delay, and React state remain in the browser. The cron route is unchanged.
 
+Schema reconciliation: Preview lacks `tracked_items.hearing_checked_at`, so hearing persistence PATCHes currently fail there. Production already has nullable `timestamp with time zone`. Apply the additive `migrations/2026-09-21-add-tracked-items-hearing-checked-at.sql` in Preview before hearing persistence testing; it adds only `hearing_checked_at timestamptz` if missing. The canonical `migration.sql` now includes the column for fresh installs. No RLS or `co_introducers` change is part of this reconciliation.
+
 - `trackedItem.hearing.persist`: exact item ID plus `hearingCheckedAt`, `nextHearingDate`, `hearingType`, `hearingLocation`, `additionalInformation`, `committeeReReferral`, `latestActivityDate`, `latestActivityLabel`, `activityCount`, `activityTimeline`, and `coIntroducers`. `introducedBy` and `status` are optional and PATCHed only when present. The server maps only these fields to the existing `tracked_items` columns and filters by exact ID. Nullable strings and arrays retain their values. No audit event is written. Primary failures return a generic error.
 - `trackedItem.hearings.audit`: exact `{ action, checked, withUpcoming }`; server best-effort logs `hearings_checked` with null item ID/title and `{ checked, withUpcoming }`. Audit failure is nonfatal.
 

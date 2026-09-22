@@ -1488,6 +1488,33 @@ test('action-status API preserves ordered writes and partial-success failures', 
   } finally { global.fetch = originalFetch; }
 });
 
+test('tracked_items hearing_checked_at reconciliation is additive and leaves other columns and RLS unchanged', () => {
+  const canonical = readRepoText('migration.sql');
+  const versioned = readRepoText('migrations/2026-09-21-add-tracked-items-hearing-checked-at.sql');
+  const block = canonical.match(/CREATE TABLE IF NOT EXISTS tracked_items \(([\s\S]*?)\n\);/);
+  assert.ok(block);
+  const actual = [...block[1].matchAll(/^\s*(\w+)\s+(text|boolean|timestamptz|integer|date|jsonb)\b/gm)]
+    .map(([, name, type]) => `${name}:${type}`);
+  assert.deepEqual(actual, [
+    'id:text', 'title:text', 'bill_number:text', 'category:text', 'status:text',
+    'last_status:text', 'committees:text', 'date:text', 'description:text',
+    'link:text', 'source:text', 'agency:text', 'introduced_by:text',
+    'co_introducers:text', 'assigned_to:text', 'priority:text',
+    'action_status:text', 'is_new:boolean', 'is_manual_entry:boolean',
+    'has_new_activity:boolean', 'activity_summary:text', 'last_checked_at:timestamptz',
+    'hearing_checked_at:timestamptz', 'tracked_at:timestamptz', 'notice_id:text',
+    'register_issue:text', 'register_notes:text', 'next_hearing_date:timestamptz',
+    'hearing_type:text', 'hearing_location:text', 'additional_information:text',
+    'manual_summary:text', 'committee_re_referral:jsonb', 'latest_activity_date:timestamptz',
+    'latest_activity_label:text', 'activity_count:integer', 'deadline:date',
+    'activity_timeline:jsonb'
+  ]);
+  assert.match(versioned, /ALTER TABLE tracked_items\s+ADD COLUMN IF NOT EXISTS hearing_checked_at timestamptz;/);
+  assert.equal((versioned.match(/\bALTER TABLE\b/g) || []).length, 1);
+  assert.equal((versioned.match(/\bADD COLUMN\b/g) || []).length, 1);
+  assert.doesNotMatch(versioned, /CREATE POLICY|DROP POLICY|ROW LEVEL SECURITY|\bDROP COLUMN\b|\bALTER COLUMN\b/i);
+});
+
 test('detected activity API preserves exact PATCH, audit, auth and failure behavior', async () => {
   const handler = await importFresh('api/app-data.js');
   const { createSignedSession } = await importFreshModule('lib/session.js');
