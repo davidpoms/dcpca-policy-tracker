@@ -708,7 +708,12 @@ test('config-table RLS keeps anon reads and removes anon writes', () => {
     'note.delete',
     'teamMember.create',
     'teamMember.update',
-    'teamMember.delete'
+    'teamMember.delete',
+    'trackedItem.assignment.update',
+    'trackedItem.priority.update',
+    'trackedItem.summary.save',
+    'trackedItem.summary.delete',
+    'trackedItem.activity.markSeen'
   ];
   const actionBlock = appData.match(/const ALLOWED_ACTIONS = new Set\(\[([\s\S]*?)\]\);/);
 
@@ -956,7 +961,169 @@ test('team member frontend mutations use app-data while reads and unrelated item
   assert.match(appText, /teamMemberId:\s*String\(editingTeamMember\)/);
   assert.match(appText, /teamMemberId:\s*String\(memberId\)/);
   assert.doesNotMatch(appText, /supabase\.from\('tracked_items'\)\.update\(\{ assigned_to: teamMemberForm\.name \}\)/);
-  assert.match(appText, /supabase\.from\('tracked_items'\)\.update\(\{ assigned_to: newAssignee \}\)/);
+  assert.match(appText, /supabase\.from\('tracked_items'\)\.update\(\{ action_status: newStatus \}\)/);
+});
+
+test('api/app-data.js implements the five tracked-item metadata action contracts', async () => {
+  const handler = await importFresh('api/app-data.js');
+  const libSession = await importFreshModule('lib/session.js');
+  const { createSignedSession } = libSession;
+  const originalFetch = global.fetch;
+  const calls = [];
+  let failureMode = null;
+
+  global.fetch = async (url, init = {}) => {
+    const call = {
+      url,
+      method: init.method || 'GET',
+      body: init.body ? JSON.parse(init.body) : undefined
+    };
+    calls.push(call);
+    if (failureMode === 'tracked-items') return { ok: false, status: 500 };
+    if (url.endsWith('/activity_log') && failureMode === 'activity') return { ok: false, status: 500 };
+    if (url.endsWith('/activity_log')) return { ok: true, status: 200 };
+    return { ok: true, status: 200 };
+  };
+
+  let cookie;
+  const invoke = async (body, headers = { cookie }) => {
+    const response = makeRes();
+    await handler({ method: 'POST', headers, body: JSON.stringify(body) }, response);
+    return response;
+  };
+
+  try {
+    await withEnv({
+      SESSION_SECRET: 'app-data-secret',
+      SUPABASE_URL: 'https://example.supabase.co',
+      SUPABASE_SERVICE_KEY: 'service-key'
+    }, async () => {
+      cookie = `dc_tracker_session=${encodeURIComponent(createSignedSession(Date.now() + 60 * 1000))}`;
+
+      let response = await invoke({
+        action: 'trackedItem.assignment.update',
+        itemId: ' item/7 ',
+        newAssignee: '  New Assignee  ',
+        oldAssignee: 'Old Assignee',
+        itemTitle: 'Title'
+      });
+      assert.equal(response.statusCode, 200);
+      assert.deepEqual(calls[0], {
+        url: 'https://example.supabase.co/rest/v1/tracked_items?id=eq.%20item%2F7%20',
+        method: 'PATCH',
+        body: { assigned_to: '  New Assignee  ' }
+      });
+      assert.deepEqual(calls[1].body, {
+        action: 'assigned',
+        item_id: ' item/7 ',
+        item_title: 'Title',
+        details: { from: 'Old Assignee', to: '  New Assignee  ' }
+      });
+
+      calls.length = 0;
+      failureMode = 'activity';
+      response = await invoke({
+        action: 'trackedItem.priority.update',
+        itemId: 'item-7',
+        newPriority: 'custom',
+        oldPriority: 'medium',
+        itemTitle: 'Title'
+      });
+      assert.equal(response.statusCode, 200);
+      assert.deepEqual(calls[0].body, { priority: 'custom' });
+      failureMode = null;
+
+      calls.length = 0;
+      response = await invoke({ action: 'trackedItem.summary.save', itemId: 'item-7', summary: null });
+      assert.equal(response.statusCode, 200);
+      assert.deepEqual(calls, [{
+        url: 'https://example.supabase.co/rest/v1/tracked_items?id=eq.item-7',
+        method: 'PATCH',
+        body: { manual_summary: null }
+      }]);
+
+      calls.length = 0;
+      response = await invoke({ action: 'trackedItem.summary.save', itemId: 'item-7', summary: '   ' });
+      assert.equal(response.statusCode, 200);
+      assert.deepEqual(calls[0].body, { manual_summary: '   ' });
+
+      calls.length = 0;
+      response = await invoke({ action: 'trackedItem.summary.delete', itemId: 'item-7' });
+      assert.equal(response.statusCode, 200);
+      assert.deepEqual(calls, [{
+        url: 'https://example.supabase.co/rest/v1/tracked_items?id=eq.item-7',
+        method: 'PATCH',
+        body: { manual_summary: null }
+      }]);
+
+      calls.length = 0;
+      response = await invoke({ action: 'trackedItem.activity.markSeen', itemId: 'item-7' });
+      assert.equal(response.statusCode, 200);
+      assert.deepEqual(calls, [{
+        url: 'https://example.supabase.co/rest/v1/tracked_items?id=eq.item-7',
+        method: 'PATCH',
+        body: { has_new_activity: false, activity_summary: null }
+      }]);
+
+      for (const body of [
+        { action: 'trackedItem.assignment.update', itemId: '', newAssignee: 'x', oldAssignee: 'y', itemTitle: 't' },
+        { action: 'trackedItem.assignment.update', itemId: 7, newAssignee: 'x', oldAssignee: 'y', itemTitle: 't' },
+        { action: 'trackedItem.priority.update', itemId: 'item-7', newPriority: 3, oldPriority: 'medium', itemTitle: 't' },
+        { action: 'trackedItem.summary.save', itemId: 'item-7', summary: 3 },
+        { action: 'trackedItem.summary.delete', itemId: '   ' },
+        { action: 'trackedItem.activity.markSeen', itemId: 7 }
+      ]) {
+        response = await invoke(body);
+        assert.equal(response.statusCode, 400);
+      }
+
+      failureMode = 'tracked-items';
+      response = await invoke({
+        action: 'trackedItem.priority.update',
+        itemId: 'item-7',
+        newPriority: 'high',
+        oldPriority: 'medium',
+        itemTitle: 'Title'
+      });
+      assert.equal(response.statusCode, 500);
+      assert.equal(response.body.error, 'Service unavailable');
+      assert.doesNotMatch(JSON.stringify(response.body), /service-key|SUPABASE_SERVICE_KEY|Supabase/i);
+
+      const unauthenticated = await invoke({ action: 'trackedItem.summary.delete', itemId: 'item-7' }, {});
+      assert.equal(unauthenticated.statusCode, 401);
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('only the five metadata functions moved behind app-data', () => {
+  const appText = readRepoText('index.html');
+  const functionBlocks = [
+    appText.match(/const updateAssignment = async \(itemId, newAssignee\) => \{([\s\S]*?)\n            \};/),
+    appText.match(/const updatePriority = async \(itemId, newPriority\) => \{([\s\S]*?)\n            \};/),
+    appText.match(/const markActivityAsSeen = async \(itemId\) => \{([\s\S]*?)\n            \};/),
+    appText.match(/const saveSummary = async \(\) => \{([\s\S]*?)\n            \};/),
+    appText.match(/const deleteManualSummary = async \(itemId\) => \{([\s\S]*?)\n            \};/)
+  ];
+
+  for (const block of functionBlocks) {
+    assert.ok(block);
+    assert.doesNotMatch(block[1], /supabase\.from\('tracked_items'\)\s*\.update/);
+  }
+  assert.match(appText, /action:\s*'trackedItem\.assignment\.update'/);
+  assert.match(appText, /action:\s*'trackedItem\.priority\.update'/);
+  assert.match(appText, /action:\s*'trackedItem\.summary\.save'/);
+  assert.match(appText, /action:\s*'trackedItem\.summary\.delete'/);
+  assert.match(appText, /action:\s*'trackedItem\.activity\.markSeen'/);
+  assert.match(appText, /summary:\s*summaryText\s*\|\|\s*null/);
+
+  assert.match(appText, /const toggleSelection = async/);
+  assert.match(appText, /const updateActionStatus = async/);
+  assert.match(appText, /const checkHearingsForTrackedItems = async/);
+  assert.match(appText, /const addManualEntry = async/);
+  assert.match(appText, /supabase\.from\('tracked_items'\)\.insert/);
+  assert.match(appText, /supabase\.from\('tracked_items'\)\.delete/);
 });
 
 test('api/app-data.js accepts and validates note.save and note.delete payloads', async () => {

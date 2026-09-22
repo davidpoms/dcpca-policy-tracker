@@ -986,10 +986,21 @@
                 const item = items.find(i => i.id === itemId);
                 if (!item) return;
                 try {
-                    const { error } = await supabase.from('tracked_items').update({ assigned_to: newAssignee }).eq('id', itemId);
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({
+                            action: 'trackedItem.assignment.update',
+                            itemId,
+                            newAssignee,
+                            oldAssignee: item.assignedTo,
+                            itemTitle: item.title
+                        })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to update assignment');
                     setItems(items.map(i => i.id === itemId ? { ...i, assignedTo: newAssignee } : i));
-                    await logActivity('assigned', itemId, item.title, { from: item.assignedTo, to: newAssignee });
                 } catch (err) { setError('Failed to update assignment: ' + err.message); }
             };
 
@@ -997,10 +1008,21 @@
                 const item = items.find(i => i.id === itemId);
                 if (!item) return;
                 try {
-                    const { error } = await supabase.from('tracked_items').update({ priority: newPriority }).eq('id', itemId);
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({
+                            action: 'trackedItem.priority.update',
+                            itemId,
+                            newPriority,
+                            oldPriority: item.priority,
+                            itemTitle: item.title
+                        })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to update priority');
                     setItems(items.map(i => i.id === itemId ? { ...i, priority: newPriority } : i));
-                    await logActivity('priority_changed', itemId, item.title, { from: item.priority, to: newPriority });
                 } catch (err) { setError('Failed to update priority: ' + err.message); }
             };
 
@@ -1043,9 +1065,14 @@
 
             const markActivityAsSeen = async (itemId) => {
                 try {
-                    const { error } = await supabase.from('tracked_items')
-                        .update({ has_new_activity: false, activity_summary: null }).eq('id', itemId);
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'trackedItem.activity.markSeen', itemId })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to mark activity as seen');
                     setItems(items.map(i => i.id === itemId ? { ...i, hasNewActivity: false, activitySummary: null } : i));
                 } catch (err) { setError('Failed to mark activity as seen: ' + err.message); }
             };
@@ -1104,8 +1131,14 @@
                 if (!editingSummary) return;
                 const item = items.find(i => i.id === editingSummary);
                 try {
-                    const { error } = await supabase.from('tracked_items').update({ manual_summary: summaryText || null }).eq('id', editingSummary);
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'trackedItem.summary.save', itemId: editingSummary, summary: summaryText || null })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to save summary');
                     setItems(prev => prev.map(i => i.id === editingSummary ? { ...i, manualSummary: summaryText || null } : i));
                     setEditingSummary(null);
                     setSummaryText('');
@@ -1114,8 +1147,14 @@
 
             const deleteManualSummary = async (itemId) => {
                 try {
-                    const { error } = await supabase.from('tracked_items').update({ manual_summary: null }).eq('id', itemId);
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'trackedItem.summary.delete', itemId })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to delete summary');
                     setItems(prev => prev.map(i => i.id === itemId ? { ...i, manualSummary: null } : i));
                 } catch (err) { setError('Failed to delete summary: ' + err.message); }
             };

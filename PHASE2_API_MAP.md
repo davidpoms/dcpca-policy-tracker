@@ -121,6 +121,47 @@ CREATE POLICY "Allow public delete"
 
 These rollback policies intentionally reopen anonymous/public writes and are emergency-only. No primary-key type changes or `added_at` changes are part of this slice.
 
+### tracked_items metadata mutation slice
+
+Status: IMPLEMENTED in `/api/app-data.js`. This slice moves only five simple metadata mutations behind the existing authenticated route:
+
+- `trackedItem.assignment.update`
+  - Request: `{ action, itemId, newAssignee, oldAssignee, itemTitle }`
+  - Exact validation: non-empty string `itemId`; string `newAssignee`, `oldAssignee`, and `itemTitle`
+  - Server write: `PATCH tracked_items` with only `{ assigned_to: newAssignee }`, filtered by the exact `itemId`
+  - Server-side best-effort audit: `assigned`, with `{ from: oldAssignee, to: newAssignee }`
+- `trackedItem.priority.update`
+  - Request: `{ action, itemId, newPriority, oldPriority, itemTitle }`
+  - Exact validation: non-empty string `itemId`; string priority values and `itemTitle`; no new priority enum
+  - Server write: `PATCH tracked_items` with only `{ priority: newPriority }`, filtered by the exact `itemId`
+  - Server-side best-effort audit: `priority_changed`, with `{ from: oldPriority, to: newPriority }`
+- `trackedItem.summary.save`
+  - Request: `{ action, itemId, summary }`
+  - Exact validation: non-empty string `itemId`; `summary` must be a string or `null`
+  - Server write: `PATCH tracked_items` with only `{ manual_summary: summary }`
+  - No activity or status-history event
+- `trackedItem.summary.delete`
+  - Request: `{ action, itemId }`
+  - Server write: `PATCH tracked_items` with only `{ manual_summary: null }`
+  - No activity or status-history event
+- `trackedItem.activity.markSeen`
+  - Request: `{ action, itemId }`
+  - Server write: `PATCH tracked_items` with exactly `{ has_new_activity: false, activity_summary: null }`
+  - No activity or status-history event
+
+The browser still performs direct SELECTs. It now sends these five mutations through `/api/app-data` and updates local React state only after a successful API response. `summaryText || null` remains in the browser, so empty strings become `null` while whitespace-only strings remain strings.
+
+The canonical `tracked_items` and `activity_log` RLS policies have intentionally not changed. Other browser writers remain active, including manual-entry create/update/delete, track/untrack, action-status plus `bill_status_history`, and hearing/activity enrichment. RLS cannot be tightened until those remaining direct writers are migrated.
+
+Remaining mutation families:
+
+- manual-entry lifecycle
+- track/untrack lifecycle
+- action-status/history
+- hearing/activity enrichment
+
+The direct `activity_log` browser helper remains for unmigrated flows. Assignment and priority audit writes for this slice now occur server-side; summary and mark-seen actions produce no activity event.
+
 ### item_notes RLS inventory and rollout
 
 Preview inventory:
