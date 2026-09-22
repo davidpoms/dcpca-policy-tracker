@@ -13,7 +13,12 @@ const ALLOWED_ACTIONS = new Set([
   'note.delete',
   'teamMember.create',
   'teamMember.update',
-  'teamMember.delete'
+  'teamMember.delete',
+  'trackedItem.assignment.update',
+  'trackedItem.priority.update',
+  'trackedItem.summary.save',
+  'trackedItem.summary.delete',
+  'trackedItem.activity.markSeen'
 ]);
 
 function isExactBody(body, allowedKeys) {
@@ -423,6 +428,119 @@ export default async function handler(req, res) {
         await logActivityEvent(supabaseUrl, serviceKey, 'note_deleted', itemId, itemTitle, {});
 
         return res.status(200).json({ ok: true, itemId });
+      }
+
+      case 'trackedItem.assignment.update': {
+        if (!isExactBody(body, ['action', 'itemId', 'newAssignee', 'oldAssignee', 'itemTitle'])) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        if (typeof body.itemId !== 'string' || body.itemId.trim() === '' ||
+            typeof body.newAssignee !== 'string' || typeof body.oldAssignee !== 'string' ||
+            typeof body.itemTitle !== 'string') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        await supabaseTableRequest(
+          supabaseUrl,
+          serviceKey,
+          'tracked_items',
+          'PATCH',
+          { assigned_to: body.newAssignee },
+          `?id=eq.${encodeURIComponent(body.itemId)}`
+        );
+        await logActivityEvent(supabaseUrl, serviceKey, 'assigned', body.itemId, body.itemTitle, {
+          from: body.oldAssignee,
+          to: body.newAssignee
+        });
+
+        return res.status(200).json({ ok: true });
+      }
+
+      case 'trackedItem.priority.update': {
+        if (!isExactBody(body, ['action', 'itemId', 'newPriority', 'oldPriority', 'itemTitle'])) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        if (typeof body.itemId !== 'string' || body.itemId.trim() === '' ||
+            typeof body.newPriority !== 'string' || typeof body.oldPriority !== 'string' ||
+            typeof body.itemTitle !== 'string') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        await supabaseTableRequest(
+          supabaseUrl,
+          serviceKey,
+          'tracked_items',
+          'PATCH',
+          { priority: body.newPriority },
+          `?id=eq.${encodeURIComponent(body.itemId)}`
+        );
+        await logActivityEvent(supabaseUrl, serviceKey, 'priority_changed', body.itemId, body.itemTitle, {
+          from: body.oldPriority,
+          to: body.newPriority
+        });
+
+        return res.status(200).json({ ok: true });
+      }
+
+      case 'trackedItem.summary.save': {
+        if (!isExactBody(body, ['action', 'itemId', 'summary'])) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        if (typeof body.itemId !== 'string' || body.itemId.trim() === '' ||
+            (typeof body.summary !== 'string' && body.summary !== null)) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        await supabaseTableRequest(
+          supabaseUrl,
+          serviceKey,
+          'tracked_items',
+          'PATCH',
+          { manual_summary: body.summary },
+          `?id=eq.${encodeURIComponent(body.itemId)}`
+        );
+
+        return res.status(200).json({ ok: true });
+      }
+
+      case 'trackedItem.summary.delete': {
+        if (!isExactBody(body, ['action', 'itemId'])) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        if (typeof body.itemId !== 'string' || body.itemId.trim() === '') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        await supabaseTableRequest(
+          supabaseUrl,
+          serviceKey,
+          'tracked_items',
+          'PATCH',
+          { manual_summary: null },
+          `?id=eq.${encodeURIComponent(body.itemId)}`
+        );
+
+        return res.status(200).json({ ok: true });
+      }
+
+      case 'trackedItem.activity.markSeen': {
+        if (!isExactBody(body, ['action', 'itemId'])) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        if (typeof body.itemId !== 'string' || body.itemId.trim() === '') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        await supabaseTableRequest(
+          supabaseUrl,
+          serviceKey,
+          'tracked_items',
+          'PATCH',
+          { has_new_activity: false, activity_summary: null },
+          `?id=eq.${encodeURIComponent(body.itemId)}`
+        );
+
+        return res.status(200).json({ ok: true });
       }
 
       case 'teamMember.create': {
