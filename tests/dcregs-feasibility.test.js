@@ -244,6 +244,58 @@ test('browse POST rejects external redirects and oversized responses', async () 
   });
 });
 
+test('browse POST uses its 30s timeout while ordinary GET remains 12s', async () => {
+  const delays = [];
+  const originalSetTimeout = global.setTimeout;
+  global.setTimeout = (callback, delay, ...args) => {
+    delays.push(delay);
+    if (delay === 30000) { queueMicrotask(() => callback(...args)); return { browseTimeout: true }; }
+    return originalSetTimeout(callback, delay, ...args);
+  };
+  try {
+    await withEnvFetch({ CRON_SECRET: secret }, async (url, options = {}) => {
+      if (String(url) === 'https://www.dcregs.dc.gov/' && options.method === 'POST') {
+        return new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+      }
+      if (String(url) === 'https://www.dcregs.dc.gov/') return response(webformsHome(), { url: String(url) });
+      return standardFetch()(url, options);
+    }, async () => {
+      const out = res(); await route.default(request(), out);
+      const diagnostic = out.body.issueDiscovery.browseSubmission;
+      assert.equal(diagnostic.timeoutMs, 30000); assert.equal(diagnostic.timedOut, true);
+      assert.equal(diagnostic.phase, 'request'); assert.equal(diagnostic.status, null);
+      assert.equal(typeof diagnostic.elapsedMs, 'number'); assert.ok(diagnostic.elapsedMs >= 0 && diagnostic.elapsedMs < 5000);
+    });
+  } finally { global.setTimeout = originalSetTimeout; }
+  assert.ok(delays.includes(12000)); assert.ok(delays.includes(30000));
+});
+
+test('non-timeout abort stays non-timeout and body failures retain status', async () => {
+  await withEnvFetch({ CRON_SECRET: secret }, async (url, options = {}) => {
+    if (String(url) === 'https://www.dcregs.dc.gov/' && options.method === 'POST') throw Object.assign(new Error('upstream abort'), { name: 'AbortError' });
+    if (String(url) === 'https://www.dcregs.dc.gov/') return response(webformsHome(), { url: String(url) });
+    return standardFetch()(url, options);
+  }, async () => {
+    const out = res(); await route.default(request(), out); const diagnostic = out.body.issueDiscovery.browseSubmission;
+    assert.equal(diagnostic.timedOut, false); assert.equal(diagnostic.phase, 'request');
+  });
+
+  await withEnvFetch({ CRON_SECRET: secret }, async (url, options = {}) => {
+    if (String(url) === 'https://www.dcregs.dc.gov/' && options.method === 'POST') {
+      const failedBody = response('', { status: 202, url: String(url) });
+      failedBody.arrayBuffer = async () => { throw new Error('body read failed'); };
+      return failedBody;
+    }
+    if (String(url) === 'https://www.dcregs.dc.gov/') return response(webformsHome(), { url: String(url) });
+    return standardFetch()(url, options);
+  }, async () => {
+    const out = res(); await route.default(request(), out); const diagnostic = out.body.issueDiscovery.browseSubmission;
+    assert.equal(diagnostic.status, 202); assert.equal(diagnostic.finalUrl, 'https://www.dcregs.dc.gov/');
+    assert.equal(diagnostic.phase, 'response-body'); assert.equal(diagnostic.timedOut, false);
+    assert.ok(['request', 'response-body', 'validation', 'complete'].includes(diagnostic.phase));
+  });
+});
+
 test('browse controls expose safe structured navigation diagnostics only', () => {
   const controls = `<html><body><form action="/Common/DCR/Issues/IssueList.aspx">
     <input name="__VIEWSTATE" value="large-secret-state"><input name="__EVENTVALIDATION" value="large-validation"><input name="__EVENTTARGET">

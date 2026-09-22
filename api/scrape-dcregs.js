@@ -4,8 +4,10 @@ const ISSUE_DATE = '9/18/2026';
 const HOSTS = new Set(['dcregs.dc.gov', 'www.dcregs.dc.gov']);
 const LIMIT = 2_000_000;
 const TIMEOUT = 12_000;
+const BROWSE_POST_TIMEOUT_MS = 30_000;
 const CAPS = { browse: 2, issues: 2, categories: 6, samples: 10 };
 const FETCH_CLEANUP = Symbol('fetchCleanup');
+const FETCH_TIMEOUT_STATE = Symbol('fetchTimeoutState');
 const MAX_WEBFORMS_STATE_BYTES = 250_000;
 const MAX_COOKIE_BYTES = 4_096;
 
@@ -75,7 +77,7 @@ async function probe(value, mode, key, counts, renderJs, timeout = TIMEOUT) {
       _cookies: mode === 'direct' ? boundedCookies(result.response) : null
     };
   } catch (error) {
-    const kind = error.code === 'SIZE' ? 'response-too-large' : error.code === 'URL' ? 'url-rejected' : error.name === 'AbortError' ? 'timeout' : 'request-error';
+    const kind = error.code === 'SIZE' ? 'response-too-large' : error.code === 'URL' ? 'url-rejected' : error.code === 'TIMEOUT' || error.name === 'AbortError' ? 'timeout' : 'request-error';
     return { ...failed(kind, safeError(error, key)), mode: mode === 'proxy' ? (renderJs ? 'scrapingbee-rendered' : 'scrapingbee-normal') : 'direct', targetUrl, finalUrl: targetUrl };
   }
 }
@@ -109,14 +111,17 @@ async function proxyRequest(target, key, render, counts, timeout) {
 
 async function timedFetch(url, options, counts, timeout) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+  const timeoutState = { fired: false };
+  const timer = setTimeout(() => { timeoutState.fired = true; controller.abort(); }, timeout);
   counts.totalHttpRequests++;
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
     response[FETCH_CLEANUP] = () => clearTimeout(timer);
+    response[FETCH_TIMEOUT_STATE] = timeoutState;
     return response;
   } catch (error) {
     clearTimeout(timer);
+    if (timeoutState.fired) throw coded('This operation was aborted', 'TIMEOUT');
     throw error;
   }
 }
@@ -146,6 +151,9 @@ export async function readBoundedResponse(response, max = LIMIT) {
     const bytes = new Uint8Array(total); let offset = 0;
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
     return { bytes, byteLength: total };
+  } catch (error) {
+    if (response[FETCH_TIMEOUT_STATE]?.fired) throw coded('This operation was aborted', 'TIMEOUT');
+    throw error;
   } finally {
     response[FETCH_CLEANUP]?.();
   }
@@ -342,30 +350,40 @@ export function extractBrowseWebFormsState(html, baseUrl = HOME) {
 }
 
 async function submitBrowseForm(home, counts) {
-  const diagnostic = { attempted: false, success: false, status: null, finalUrl: null, structuralValid: false, targetIssueCandidateCount: 0, targetIssueIdentified: false };
+  const started = monotonicNow();
+  const diagnostic = { attempted: false, success: false, status: null, finalUrl: null, structuralValid: false,
+    targetIssueCandidateCount: 0, targetIssueIdentified: false, timeoutMs: BROWSE_POST_TIMEOUT_MS,
+    elapsedMs: 0, timedOut: false, phase: 'request' };
   const state = extractBrowseWebFormsState(home.body, home.finalUrl || home.targetUrl);
-  if (!state.valid) return { diagnostic: { ...diagnostic, reason: state.reason }, page: null };
+  if (!state.valid) return { diagnostic: finishBrowseDiagnostic(diagnostic, started, { reason: state.reason }), page: null };
   diagnostic.attempted = true; counts.browseSubmissionRequests++;
   const params = new URLSearchParams(state.fields); params.set('ctl00$MainContent$btndcrgo', 'Go');
   const headers = { 'User-Agent': 'DCPCA-DCRegs-Feasibility/1.0', 'Content-Type': 'application/x-www-form-urlencoded' };
   if (home._cookies && new URL(home.finalUrl || home.targetUrl).origin === new URL(state.action).origin) headers.Cookie = home._cookies;
   try {
-    const result = await constrainedBrowsePost(state.action, params.toString(), headers, counts, TIMEOUT);
+    const result = await constrainedBrowsePost(state.action, params.toString(), headers, counts, BROWSE_POST_TIMEOUT_MS);
+    diagnostic.status = result.response.status; diagnostic.finalUrl = result.finalUrl; diagnostic.phase = 'response-body';
     const data = await readBoundedResponse(result.response, LIMIT);
     const body = new TextDecoder().decode(data.bytes);
+    diagnostic.phase = 'validation';
     const contentValidation = classifyDcRegsResponse(body, result.response.status, result.finalUrl);
     const success = result.response.status >= 200 && result.response.status < 300 && contentValidation.structuralValid;
     return {
-      diagnostic: { ...diagnostic, success, status: result.response.status, finalUrl: result.finalUrl,
-        structuralValid: contentValidation.structuralValid, reason: success ? null : 'Browse submission response failed structural validation' },
+      diagnostic: finishBrowseDiagnostic(diagnostic, started, { success, structuralValid: contentValidation.structuralValid,
+        phase: 'complete', reason: success ? null : 'Browse submission response failed structural validation' }),
       page: success ? { mode: 'direct-webforms-post', targetUrl: result.finalUrl, status: result.response.status,
         finalUrl: result.finalUrl, contentType: result.response.headers?.get?.('content-type') || null,
         characterLength: body.length, byteLength: data.byteLength, contentValidation, body } : null
     };
   } catch (error) {
-    return { diagnostic: { ...diagnostic, reason: safeError(error) }, page: null };
+    return { diagnostic: finishBrowseDiagnostic(diagnostic, started, { timedOut: error?.code === 'TIMEOUT', reason: safeError(error) }), page: null };
   }
 }
+
+function finishBrowseDiagnostic(diagnostic, started, changes) {
+  return { ...diagnostic, ...changes, elapsedMs: Math.max(0, Math.round(monotonicNow() - started)) };
+}
+function monotonicNow() { return globalThis.performance?.now?.() ?? Date.now(); }
 
 async function constrainedBrowsePost(action, body, headers, counts, timeout) {
   if (allowedDcRegsUrl(action) !== HOME) throw coded('Browse form action rejected', 'URL');
@@ -395,7 +413,9 @@ async function discoverIssue(home, key, counts) {
     identification: [], browseUrls: [], targetIssueUrls: [], categoryUrls: [], categoryUrlsAccepted: 0, categoryUrlsRejected: 0,
     targetPagesFetched: 0, noticesFromTargetIssue: 0, categories: [], noticeCount: 0, sampleNotices: [],
     browseControlCandidates: [], browseControlPageSignals: { hasViewState: false, hasEventValidation: false, hasEventTarget: false },
-    browseSubmission: { attempted: false, success: false, status: null, finalUrl: null, structuralValid: false, targetIssueCandidateCount: 0, targetIssueIdentified: false } };
+    browseSubmission: { attempted: false, success: false, status: null, finalUrl: null, structuralValid: false,
+      targetIssueCandidateCount: 0, targetIssueIdentified: false, timeoutMs: BROWSE_POST_TIMEOUT_MS,
+      elapsedMs: 0, timedOut: false, phase: 'request' } };
   if (!home) return { ...base, reason: 'No validated homepage response' };
   const browseControls = inspectBrowseControls(home.body, home.targetUrl);
   base.browseControlCandidates = browseControls.candidates;

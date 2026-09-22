@@ -8,7 +8,7 @@ Every direct or discovered target must use HTTPS and have the exact hostname `dc
 
 Discovery is capped at two issue-browser pages, two target-issue pages, six category pages, and ten returned sample notices. A direct request is preferred; ScrapingBee is used only after direct content validation fails, and rendered mode is attempted only after a normal proxy response is insufficient.
 
-Weekly discovery may make one tightly constrained, read-only WebForms POST to `https://www.dcregs.dc.gov/` using the exact `ctl00$MainContent$btndcrgo=Go` control. Only hidden `__*` state from that form is submitted, with a 250 KB encoded-state cap. Up to 4 KB of bounded cookies from the same-origin homepage response may accompany that one request and are never returned. Redirect, hostname, timeout, and 2 MB response limits are unchanged. With ScrapingBee disabled, the complete bounded probe makes at most 16 external requests, including the single navigation POST.
+Weekly discovery may make one tightly constrained, read-only WebForms POST to `https://www.dcregs.dc.gov/` using the exact `ctl00$MainContent$btndcrgo=Go` control. Only hidden `__*` state from that form is submitted, with a 250 KB encoded-state cap. Up to 4 KB of bounded cookies from the same-origin homepage response may accompany that one request and are never returned. The browse POST has a dedicated 30-second timeout; ordinary requests remain limited to 12 seconds. Redirect, hostname, and 2 MB response limits are unchanged. With ScrapingBee disabled, the complete bounded probe makes at most 16 external requests, including the single navigation POST.
 
 ## Preview validation
 
