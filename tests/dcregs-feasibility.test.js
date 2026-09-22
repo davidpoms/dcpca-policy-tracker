@@ -21,6 +21,15 @@ const home = `<html><body><input name="__VIEWSTATE" value="state">District of Co
 <a href="/issues.aspx?IssueID=73-38">September 18, 2026</a></body></html>`;
 const issue = `<html><body>District of Columbia Register<a href="/category.aspx?IssueID=73-38&CategoryID=1">Rules</a></body></html>`;
 const category = `<html><body>District of Columbia Register<a href="/Common/NoticeDetail.aspx?NoticeId=N150000">Target notice</a></body></html>`;
+function visibleNoticeHtml({ id, category: registerCategory, subCategory = null, title }) {
+  return `<html><head><title>- DCRegs</title><style>.x{content:'Register Category : Fake';}</style><script>const fake='Agency Name : Wrong';</script></head><body>
+  <div>District of Columbia Register</div><div>Notice ID : ${id} Details</div><div>${title}</div>
+  <div>Register Category :</div><div>${registerCategory}</div>
+  ${subCategory ? `<div>Sub Category :</div><div>${subCategory}</div>` : ''}
+  <div>Agency Name :</div><div>Zoning, Office of</div><div>Notice File :</div><div>View text</div>
+  <div>Register Issue :</div><div>9/18/2026&nbsp;Vol&#160;73/38</div><div>Publish Date :</div><div>9/18/2026 12:00 AM</div>
+  <div>Link to this Notice :</div><div>Footer text that must not be consumed</div><a href="/Common/NoticeDetail.aspx?NoticeId=${id}">NoticeDetail.aspx</a></body></html>`;
+}
 
 function response(body, { status = 200, url = 'https://dcregs.dc.gov/', type = 'text/html', headers = {} } = {}) {
   const bytes = new TextEncoder().encode(body);
@@ -129,24 +138,52 @@ test('notice metadata diagnostics report only bounded public fields', () => {
   ]);
 });
 
+test('visible-text fallback parses both known DCRegs notice shapes conservatively', () => {
+  const firstHtml = visibleNoticeHtml({ id: 'N146539', category: 'Public Hearings', title: 'Public Hearing Notice' });
+  const first = route.parseNoticeMetadata(firstHtml, 'https://dcregs.dc.gov/Common/NoticeDetail.aspx?NoticeId=N146539');
+  assert.equal(first.noticeId, 'N146539'); assert.equal(first.title, 'Public Hearing Notice');
+  assert.equal(first.registerCategory, 'Public Hearings'); assert.equal(first.subCategory, null); assert.equal(first.agency, 'Zoning, Office of');
+  assert.equal(first.registerIssue, '9/18/2026 Vol 73/38'); assert.equal(first.issueDate, '9/18/2026');
+  assert.equal(first.volume, '73'); assert.equal(first.issueNumber, '38'); assert.match(first.publishDate, /^9\/18\/2026/);
+
+  const secondHtml = visibleNoticeHtml({ id: 'N146506', category: 'Notices, Opinions, and Orders', subCategory: 'Orders', title: 'Order Notice' });
+  const second = route.parseNoticeMetadata(secondHtml, 'https://dcregs.dc.gov/Common/NoticeDetail.aspx?NoticeId=N146506');
+  assert.equal(second.registerCategory, 'Notices, Opinions, and Orders'); assert.equal(second.subCategory, 'Orders');
+  assert.equal(second.agency, 'Zoning, Office of'); assert.equal(second.issueNumber, '38');
+  assert.doesNotMatch(JSON.stringify(second), /Fake|Wrong|Footer text/);
+
+  const validation = route.classifyDcRegsResponse(firstHtml, 200, 'https://dcregs.dc.gov/Common/NoticeDetail.aspx?NoticeId=N146539');
+  assert.equal(validation.structuralValid, true); assert.equal(validation.realContent, true);
+});
+
+test('existing structured metadata remains the first choice', () => {
+  const parsed = route.parseNoticeMetadata(n539, 'https://dcregs.dc.gov/Common/NoticeDetail.aspx?NoticeId=N146539');
+  assert.equal(parsed.title, 'Public Hearing Notice'); assert.equal(parsed.registerCategory, 'Public Hearings');
+  assert.equal(parsed.agency, 'Zoning, Office of');
+});
+
 test('browse controls expose safe structured navigation diagnostics only', () => {
   const controls = `<html><body><form action="/Common/DCR/Issues/IssueList.aspx">
     <input name="__VIEWSTATE" value="large-secret-state"><input name="__EVENTVALIDATION" value="large-validation"><input name="__EVENTTARGET">
     <input id="browseInput" name="ctl00$browse" type="button" value="Browse through DCR Issues" onclick="__doPostBack('ctl00$browse','open')">
+    <span>Browse through DCR Issues..</span><input id="imageControl" type="image" src="/images/go.png"><input id="submitControl" type="submit">
     <button id="browseButton" onclick="window.open('https://evil.test/issues')">Browse through DCR Issues</button>
     <a href="javascript:alert(1)">Browse through DCR Issues</a>
-  </form>${Array.from({ length: 6 }, (_, i) => `<button id="extra${i}">Browse through DCR Issues</button>`).join('')}</body></html>`;
+  </form>${Array.from({ length: 20 }, (_, i) => `<button id="extra${i}">Browse through DCR Issues</button>`).join('')}</body></html>`;
   const result = route.inspectBrowseControls(controls, 'https://www.dcregs.dc.gov/');
-  assert.equal(result.candidates.length, 5);
+  assert.equal(result.candidates.length, 15);
   assert.deepEqual(result.pageSignals, { hasViewState: true, hasEventValidation: true, hasEventTarget: true });
   assert.equal(result.candidates[0].tag, 'input');
   assert.equal(result.candidates[0].formAction, 'https://www.dcregs.dc.gov/Common/DCR/Issues/IssueList.aspx');
   assert.deepEqual(result.candidates[0].onclick, {
     hasDoPostBack: true, eventTarget: 'ctl00$browse', eventArgument: 'open', hasWindowOpen: false, allowedWindowOpenUrl: null
   });
-  assert.equal(result.candidates[1].onclick.hasWindowOpen, true);
-  assert.equal(result.candidates[1].onclick.allowedWindowOpenUrl, null);
-  assert.equal(result.candidates[2].href, null);
+  assert.equal(result.candidates[1].tag, 'input'); assert.equal(result.candidates[1].type, 'image');
+  assert.equal(result.candidates[1].srcPath, '/images/go.png'); assert.equal(result.candidates[1].nearBrowseText, true);
+  assert.equal(result.candidates[2].type, 'submit');
+  assert.equal(result.candidates[3].onclick.hasWindowOpen, true);
+  assert.equal(result.candidates[3].onclick.allowedWindowOpenUrl, null);
+  assert.equal(result.candidates[4].href, null);
   assert.doesNotMatch(JSON.stringify(result), /large-secret-state|large-validation|alert\(1\)|evil\.test/);
 });
 

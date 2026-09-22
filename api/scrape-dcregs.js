@@ -199,15 +199,19 @@ export function classifyDcRegsResponse(html, status, targetUrl = '') {
 
 export function parseNoticeMetadata(html, source = '') {
   const fields = fieldsFrom(html);
-  const noticeId = first(fields, ['notice id', 'noticeid']) || match(html, /NoticeId=([Nn]\d+)/i)?.toUpperCase() || null;
-  const registerIssue = first(fields, ['register issue', 'd.c. register issue', 'dc register issue']);
+  const fallback = visibleNoticeFields(html);
+  const noticeId = first(fields, ['notice id', 'noticeid']) || match(html, /NoticeId=([Nn]\d+)/i)?.toUpperCase() || fallback.noticeId || null;
+  const structuredTitle = first(fields, ['subject', 'title', 'notice title']) || clean(match(html, /<h1[^>]*>([\s\S]*?)<\/h1>/i) || match(html, /<title[^>]*>([\s\S]*?)<\/title>/i)) || null;
+  const title = structuredTitle && !/^-?\s*DCRegs\s*$/i.test(structuredTitle) ? structuredTitle : fallback.title || structuredTitle;
+  const registerIssue = first(fields, ['register issue', 'd.c. register issue', 'dc register issue']) || fallback.registerIssue;
   const issue = registerIssue?.match(/(\d{1,2}\/\d{1,2}\/\d{4}).*?Vol\s*\.?\s*(\d+)\s*\/\s*(\d+)/i);
   return {
-    noticeId, title: first(fields, ['subject', 'title', 'notice title']) || clean(match(html, /<h1[^>]*>([\s\S]*?)<\/h1>/i) || match(html, /<title[^>]*>([\s\S]*?)<\/title>/i)) || null,
-    registerCategory: first(fields, ['register category', 'category']), subCategory: first(fields, ['sub category', 'subcategory']),
-    agency: first(fields, ['agency', 'agency or council']), registerIssue: registerIssue || null,
+    noticeId, title,
+    registerCategory: first(fields, ['register category', 'category']) || fallback.registerCategory,
+    subCategory: first(fields, ['sub category', 'subcategory']) || fallback.subCategory,
+    agency: first(fields, ['agency', 'agency or council', 'agency name']) || fallback.agency, registerIssue: registerIssue || null,
     issueDate: issue?.[1] || match(registerIssue, /(\d{1,2}\/\d{1,2}\/\d{4})/), volume: issue?.[2] || null, issueNumber: issue?.[3] || null,
-    publishDate: first(fields, ['publish date', 'publication date']),
+    publishDate: first(fields, ['publish date', 'publication date']) || fallback.publishDate,
     canonicalUrl: noticeId ? `https://dcregs.dc.gov/Common/NoticeDetail.aspx?NoticeId=${noticeId}` : allowedDcRegsUrl(source),
     viewTextTargets: extractViewTargets(html, source).accepted
   };
@@ -219,6 +223,53 @@ function fieldsFrom(html) {
   for (const m of String(html || '').matchAll(cells)) { const k = clean(m[1]).replace(/:$/, '').toLowerCase(); const v = clean(m[2]); if (k && v) map.set(k, v); }
   return map;
 }
+
+export function visibleNoticeFields(html) {
+  const visible = visibleText(html);
+  const definitions = [
+    ['noticeIdBlock', /\bNotice\s+ID\s*:/i], ['registerCategory', /\bRegister\s+Category\s*:/i],
+    ['subCategory', /\bSub\s+Category\s*:/i], ['agency', /\bAgency(?:\s+Name)?\s*:/i],
+    ['noticeFile', /\bNotice\s+File\s*:/i], ['registerIssue', /\bRegister\s+Issue\s*:/i],
+    ['publishDate', /\bPublish\s+Date\s*:/i], ['link', /\bLink\s+to\s+this\s+Notice\s*:/i]
+  ];
+  const positions = [];
+  for (const [name, pattern] of definitions) { const found = pattern.exec(visible); if (found) positions.push({ name, start: found.index, valueStart: found.index + found[0].length }); }
+  positions.sort((a, b) => a.start - b.start);
+  const values = {};
+  positions.forEach((item, index) => { values[item.name] = visible.slice(item.valueStart, positions[index + 1]?.start ?? visible.length).trim().slice(0, 2000); });
+  const noticeMatch = values.noticeIdBlock?.match(/\b(N\d+)\b/i);
+  const detailsEnd = values.noticeIdBlock?.match(/\bN\d+\b\s*Details\s+([\s\S]*)$/i);
+  return {
+    noticeId: noticeMatch?.[1]?.toUpperCase() || null,
+    title: cleanVisibleValue(detailsEnd?.[1]),
+    registerCategory: cleanVisibleValue(values.registerCategory),
+    subCategory: cleanVisibleValue(values.subCategory),
+    agency: cleanVisibleValue(values.agency),
+    registerIssue: cleanVisibleValue(values.registerIssue),
+    publishDate: cleanVisibleValue(values.publishDate)
+  };
+}
+
+function visibleText(html) {
+  return decodeHtmlEntities(String(html || '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?(?:div|p|tr|td|th|li|section|article|header|footer|h[1-6]|form|fieldset|legend)\b[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, ' '))
+    .replace(/[\t\f\v\u00a0 ]+/g, ' ')
+    .replace(/\s*\n\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function decodeHtmlEntities(value) {
+  return value.replace(/&nbsp;|&#160;|&#x0*a0;/gi, ' ').replace(/&amp;/gi, '&').replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code))).replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)));
+}
+function cleanVisibleValue(value) { return value ? value.replace(/\s+/g, ' ').trim().slice(0, 1000) || null : null; }
 function first(map, names) { for (const name of names) if (map.get(name)) return map.get(name); return null; }
 function clean(value) { return String(value || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/\s+/g, ' ').trim(); }
 function match(value, regex) { return String(value || '').match(regex)?.[1] || null; }
@@ -307,14 +358,20 @@ function browseLinks(html, base) {
 export function inspectBrowseControls(html, baseUrl = HOME) {
   const text = String(html || '');
   const candidates = [];
+  const browsePositions = [...text.matchAll(/Browse through DCR Issues/gi)].map(item => item.index);
   const elementPattern = /<(input|button|a)\b([^>]*)(?:>([\s\S]*?)<\/\1>)?/gi;
   for (const element of text.matchAll(elementPattern)) {
     const tag = element[1].toLowerCase();
     const attrs = element[2] || '';
+    const type = (attribute(attrs, 'type') || '').toLowerCase();
     const value = attribute(attrs, 'value');
     const label = clean(element[3] || value || attribute(attrs, 'title') || attribute(attrs, 'aria-label'));
-    if (!/browse through dcr issues/i.test(label + ' ' + value)) continue;
     const hrefRaw = attribute(attrs, 'href');
+    const nearBrowseText = /browse through dcr issues/i.test(label + ' ' + value)
+      || browsePositions.some(position => Math.abs(position - element.index) <= 600);
+    const eligibleInput = tag === 'input' && ['submit', 'button', 'image'].includes(type);
+    const relevantAnchor = tag === 'a' && (nearBrowseText || /Issue(?:Category)?List\.aspx|DCR\/Issues/i.test(hrefRaw || ''));
+    if (!(eligibleInput || tag === 'button' || relevantAnchor)) continue;
     const onclick = attribute(attrs, 'onclick');
     const postback = onclick?.match(/__doPostBack\(\s*['"]([A-Za-z0-9_$:.\-]+)['"]\s*,\s*['"]([A-Za-z0-9_$:.\-]*)['"]\s*\)/i);
     const windowOpen = onclick?.match(/window\.open\(\s*['"]([^'"]+)['"]/i);
@@ -323,9 +380,13 @@ export function inspectBrowseControls(html, baseUrl = HOME) {
     const formEnd = before.lastIndexOf('</form>');
     const formTag = formStart > formEnd ? text.slice(formStart, text.indexOf('>', formStart) + 1) : '';
     const formActionRaw = match(formTag, /action\s*=\s*["']([^"']+)["']/i);
+    const srcRaw = attribute(attrs, 'src');
+    const allowedSrc = srcRaw ? allowedDcRegsUrl(srcRaw, baseUrl) : null;
     candidates.push({
       tag, id: safeAttribute(attribute(attrs, 'id')), name: safeAttribute(attribute(attrs, 'name')),
-      type: safeAttribute(attribute(attrs, 'type')), value: safeAttribute(value), text: safeAttribute(clean(element[3])),
+      type: safeAttribute(type), value: safeAttribute(value), alt: safeAttribute(attribute(attrs, 'alt')),
+      title: safeAttribute(attribute(attrs, 'title')), text: safeAttribute(clean(element[3])), nearBrowseText,
+      srcPath: allowedSrc ? new URL(allowedSrc).pathname : null,
       href: hrefRaw ? allowedDcRegsUrl(hrefRaw, baseUrl) : null,
       formAction: formActionRaw ? allowedDcRegsUrl(formActionRaw, baseUrl) : null,
       onclick: {
@@ -334,7 +395,7 @@ export function inspectBrowseControls(html, baseUrl = HOME) {
         allowedWindowOpenUrl: windowOpen ? allowedDcRegsUrl(windowOpen[1], baseUrl) : null
       }
     });
-    if (candidates.length === 5) break;
+    if (candidates.length === 15) break;
   }
   return {
     candidates,
