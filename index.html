@@ -952,29 +952,46 @@
                 const isCurrentlySelected = selectedItems.has(itemId);
                 try {
                     if (isCurrentlySelected) {
-                        const { error } = await supabase.from('tracked_items').delete().eq('id', itemId);
-                        if (error) throw error;
+                        const response = await fetch('/api/app-data', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'same-origin',
+                            body: JSON.stringify({ action: 'trackedItem.untrack', itemId, itemTitle: item.title })
+                        });
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data?.error || 'Failed to update tracking');
                         const newSelected = new Set(selectedItems);
                         newSelected.delete(itemId);
                         setSelectedItems(newSelected);
-                        await logActivity('item_untracked', itemId, item.title);
                     } else {
-                        const { error } = await supabase.from('tracked_items').insert({
-                            id: item.id, title: item.title, bill_number: item.billNumber,
-                            category: item.category, status: item.status, committees: item.committees,
-                            date: item.date, description: item.description, link: item.link,
-                            source: item.source, agency: item.agency,
-                            is_manual_entry: item.source === 'Municipal Register',
-                            is_new: item.isNew, assigned_to: 'Unassigned', priority: 'medium',
-                            action_status: 'action_needed', introduced_by: item.introducedBy,
-                            last_status: item.status, last_checked_at: new Date().toISOString(), has_new_activity: false
+                        const response = await fetch('/api/app-data', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'same-origin',
+                            body: JSON.stringify({
+                                action: 'trackedItem.track',
+                                itemId: item.id,
+                                title: item.title,
+                                billNumber: item.billNumber ?? null,
+                                category: item.category ?? null,
+                                status: item.status ?? null,
+                                committees: item.committees ?? null,
+                                date: item.date ?? null,
+                                description: item.description ?? null,
+                                link: item.link ?? null,
+                                source: item.source,
+                                agency: item.agency ?? null,
+                                isManualEntry: item.source === 'Municipal Register',
+                                isNew: item.isNew ?? null,
+                                introducedBy: item.introducedBy ?? null
+                            })
                         });
-                        if (error) throw error;
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data?.error || 'Failed to update tracking');
                         const newSelected = new Set(selectedItems);
                         newSelected.add(itemId);
                         setSelectedItems(newSelected);
                         setItems(items.map(i => i.id === itemId ? { ...i, assignedTo: 'Unassigned', priority: 'medium', actionStatus: 'action_needed' } : i));
-                        await logActivity('item_tracked', itemId, item.title, { source: item.source, category: item.category });
                     }
                 } catch (err) {
                     console.error('Error toggling selection:', err);
