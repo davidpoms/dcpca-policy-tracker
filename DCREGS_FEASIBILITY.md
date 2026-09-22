@@ -26,4 +26,6 @@ Notice Detail validation reports field-presence and parsed public-metadata diagn
 
 When structured table/cell parsing misses Notice Detail metadata, the diagnostic parser falls back to normalized visible text with scripts and styles removed and values bounded by known DCRegs labels. Homepage navigation diagnostics include at most fifteen eligible inputs, buttons, and relevant links, including controls located near the browse label even when the control itself has no visible text.
 
+URL-bearing HTML attributes are entity-decoded before URL parsing and allowlist validation. This converts encoded query separators such as `&amp;`, `&#38;`, and `&#x26;` into real separators while preserving the exact HTTPS DCRegs hostname restrictions.
+
 This spike does **not** establish that ingestion is viable unless the September 18, 2026 issue is positively identified, a target issue or descended category page is fetched, and at least one notice is enumerated from that target chain. Generic browse-page notices and successful parsing of the two known individual notices do not count. No production workflow, tracked item, candidate record, report, schedule, or database table is created or modified.

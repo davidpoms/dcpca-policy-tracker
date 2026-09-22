@@ -289,8 +289,8 @@ function extractViewTargets(html, base) {
   const raw = [];
   for (const m of String(html || '').matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
     if (!/view\s*text|view\s*(?:document|pdf)|download/i.test(clean(m[2]) + ' ' + m[1])) continue;
-    const href = match(m[1], /href\s*=\s*["']([^"']+)["']/i); if (href && !/^javascript:/i.test(href)) raw.push(href);
-    const popup = match(m[1], /(?:window\.open|open)\s*\(\s*["']([^"']+)["']/i); if (popup) raw.push(popup);
+    const href = decodeHtmlAttributeValue(match(m[1], /href\s*=\s*["']([^"']+)["']/i)); if (href && !/^javascript:/i.test(href)) raw.push(href);
+    const popup = decodeHtmlAttributeValue(match(m[1], /(?:window\.open|open)\s*\(\s*["']([^"']+)["']/i)); if (popup) raw.push(popup);
   }
   return validate(raw, base, 5);
 }
@@ -300,7 +300,7 @@ async function inspectDocuments(parsed, pages, key, counts) {
   for (const item of parsed) {
     const page = pages.find(p => p.targetUrl === item.targetUrl);
     const targets = extractViewTargets(page?.body, item.targetUrl);
-    const rawAction = match(page?.body, /<form\b[^>]*action\s*=\s*["']([^"']+)["']/i);
+    const rawAction = decodeHtmlAttributeValue(match(page?.body, /<form\b[^>]*action\s*=\s*["']([^"']+)["']/i));
     const formAction = rawAction ? allowedDcRegsUrl(rawAction, item.targetUrl) : null;
     const result = { noticeId: item.metadata?.noticeId || null, identified: targets.accepted.length > 0,
       targets: targets.accepted, rejectedTargets: targets.rejected, formAction, formActionRejected: Boolean(rawAction && !formAction), fetch: null };
@@ -332,7 +332,7 @@ export function extractBrowseWebFormsState(html, baseUrl = HOME) {
       && /^submit$/i.test(attribute(item[1], 'type') || '')
       && attribute(item[1], 'value') === 'Go');
     if (!button) continue;
-    const action = allowedDcRegsUrl(attribute(formAttrs, 'action') || '/', baseUrl);
+    const action = allowedDcRegsUrl(urlAttribute(formAttrs, 'action') || '/', baseUrl);
     if (action !== HOME) return { valid: false, reason: 'Browse form action rejected', action: null, fields: null, encodedBytes: 0 };
     const fields = {};
     for (const input of formBody.matchAll(/<input\b([^>]*)>/gi)) {
@@ -456,7 +456,7 @@ async function validatedPage(url, key, counts) { return (await probeFallback(url
 function browseLinks(html, base) {
   const raw = [];
   for (const a of anchors(html)) if (/browse through dcr issues|dcr issues/i.test(a.text) || /Issue(?:Category)?List\.aspx/i.test(a.href)) raw.push(a.href);
-  const action = match(html, /<form\b[^>]*action\s*=\s*["']([^"']+)["']/i); if (action && /Issue(?:Category)?List\.aspx/i.test(action)) raw.push(action);
+  const action = decodeHtmlAttributeValue(match(html, /<form\b[^>]*action\s*=\s*["']([^"']+)["']/i)); if (action && /Issue(?:Category)?List\.aspx/i.test(action)) raw.push(action);
   return validate(raw, base);
 }
 
@@ -471,21 +471,21 @@ export function inspectBrowseControls(html, baseUrl = HOME) {
     const type = (attribute(attrs, 'type') || '').toLowerCase();
     const value = attribute(attrs, 'value');
     const label = clean(element[3] || value || attribute(attrs, 'title') || attribute(attrs, 'aria-label'));
-    const hrefRaw = attribute(attrs, 'href');
+    const hrefRaw = urlAttribute(attrs, 'href');
     const nearBrowseText = /browse through dcr issues/i.test(label + ' ' + value)
       || browsePositions.some(position => Math.abs(position - element.index) <= 600);
     const eligibleInput = tag === 'input' && ['submit', 'button', 'image'].includes(type);
     const relevantAnchor = tag === 'a' && (nearBrowseText || /Issue(?:Category)?List\.aspx|DCR\/Issues/i.test(hrefRaw || ''));
     if (!(eligibleInput || tag === 'button' || relevantAnchor)) continue;
-    const onclick = attribute(attrs, 'onclick');
+    const onclick = decodeHtmlAttributeValue(attribute(attrs, 'onclick'));
     const postback = onclick?.match(/__doPostBack\(\s*['"]([A-Za-z0-9_$:.\-]+)['"]\s*,\s*['"]([A-Za-z0-9_$:.\-]*)['"]\s*\)/i);
     const windowOpen = onclick?.match(/window\.open\(\s*['"]([^'"]+)['"]/i);
     const before = text.slice(0, element.index);
     const formStart = before.lastIndexOf('<form');
     const formEnd = before.lastIndexOf('</form>');
     const formTag = formStart > formEnd ? text.slice(formStart, text.indexOf('>', formStart) + 1) : '';
-    const formActionRaw = match(formTag, /action\s*=\s*["']([^"']+)["']/i);
-    const srcRaw = attribute(attrs, 'src');
+    const formActionRaw = decodeHtmlAttributeValue(match(formTag, /action\s*=\s*["']([^"']+)["']/i));
+    const srcRaw = urlAttribute(attrs, 'src');
     const allowedSrc = srcRaw ? allowedDcRegsUrl(srcRaw, baseUrl) : null;
     candidates.push({
       tag, id: safeAttribute(attribute(attrs, 'id')), name: safeAttribute(attribute(attrs, 'name')),
@@ -515,10 +515,12 @@ export function inspectBrowseControls(html, baseUrl = HOME) {
 function attribute(attrs, name) {
   return String(attrs || '').match(new RegExp(`\\b${name}\\s*=\\s*(["'])([\\s\\S]*?)\\1`, 'i'))?.[2] || null;
 }
+function urlAttribute(attrs, name) { return decodeHtmlAttributeValue(attribute(attrs, name)); }
+export function decodeHtmlAttributeValue(value) { return value === null || value === undefined ? null : decodeHtmlEntities(String(value)); }
 function safeAttribute(value) { return value ? clean(value).slice(0, 200) || null : null; }
 function issueLinks(html, base) {
   const raw = []; const mechanisms = []; const date = /9\/18\/2026|September\s+18,?\s+2026/i;
-  for (const a of anchors(html)) if (date.test(a.text + ' ' + a.attrs)) { if (a.href && !/^javascript:/i.test(a.href)) { raw.push(a.href); mechanisms.push('link'); } const popup = match(a.attrs, /(?:window\.open|open)\s*\(\s*["']([^"']+)/i); if (popup) { raw.push(popup); mechanisms.push('onclick'); } }
+  for (const a of anchors(html)) if (date.test(a.text + ' ' + a.attrs)) { if (a.href && !/^javascript:/i.test(a.href)) { raw.push(a.href); mechanisms.push('link'); } const popup = decodeHtmlAttributeValue(match(a.attrs, /(?:window\.open|open)\s*\(\s*["']([^"']+)/i)); if (popup) { raw.push(popup); mechanisms.push('onclick'); } }
   const accepted = validate(raw, base);
   const issueId = match(accepted.accepted.join(' '), /[?&]IssueI[Dd]=([^&]+)/i);
   return { ...accepted, issueId, mechanisms };
@@ -533,7 +535,7 @@ function noticeLinks(html, base) {
   for (const a of anchors(html)) { const url = allowedDcRegsUrl(a.href, base); const id = url && match(url, /NoticeId=([Nn]\d+)/i)?.toUpperCase(); if (id) out.push({ noticeId: id, title: a.text, category: null, agency: null, detailUrl: url }); }
   return out;
 }
-function anchors(html) { return [...String(html || '').matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)].map(m => ({ attrs: m[1], href: match(m[1], /href\s*=\s*["']([^"']+)/i) || '', text: clean(m[2]) })); }
+function anchors(html) { return [...String(html || '').matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)].map(m => ({ attrs: m[1], href: decodeHtmlAttributeValue(match(m[1], /href\s*=\s*["']([^"']+)/i)) || '', text: clean(m[2]) })); }
 function validate(values, base, cap = Infinity) { const accepted = []; let rejected = 0; for (const value of values) { const url = allowedDcRegsUrl(value, base); if (!url) rejected++; else if (!accepted.includes(url) && accepted.length < cap) accepted.push(url); } return { accepted, rejected }; }
 function unique(items, key) { const seen = new Set(); return items.filter(item => { const k = key(item); return k && !seen.has(k) && seen.add(k); }); }
 function expose({ body, _cookies, ...safe }) { return safe; }

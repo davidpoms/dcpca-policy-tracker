@@ -80,6 +80,45 @@ test('DCRegs allowlist accepts only exact HTTPS hosts', () => {
   assert.deepEqual(route.parseNoticeMetadata(malicious, 'https://dcregs.dc.gov/x').viewTextTargets, []);
 });
 
+test('URL attributes decode entity query separators before allowlist validation', () => {
+  const base = 'https://www.dcregs.dc.gov/Common/DCR/Issues/IssueDetailPage.aspx?issueID=1209';
+  for (const encoded of [
+    'IssueCategoryList.aspx?CategoryID=16&amp;IssueID=1209',
+    'IssueCategoryList.aspx?CategoryID=16&#38;IssueID=1209',
+    'IssueCategoryList.aspx?CategoryID=16&#x26;IssueID=1209'
+  ]) {
+    const decoded = route.decodeHtmlAttributeValue(encoded);
+    const accepted = route.allowedDcRegsUrl(decoded, base);
+    assert.equal(accepted, 'https://www.dcregs.dc.gov/Common/DCR/Issues/IssueCategoryList.aspx?CategoryID=16&IssueID=1209');
+    const url = new URL(accepted);
+    assert.equal(url.searchParams.get('CategoryID'), '16'); assert.equal(url.searchParams.get('IssueID'), '1209');
+    assert.equal(url.searchParams.has('amp;IssueID'), false);
+  }
+  assert.equal(route.allowedDcRegsUrl(route.decodeHtmlAttributeValue('https:&#x2f;&#x2f;evil.test/path'), base), null);
+  assert.equal(route.allowedDcRegsUrl(route.decodeHtmlAttributeValue('https://dcregs.dc.gov&#46;evil.test/path'), base), null);
+});
+
+test('entity-encoded category link is fetched and returned with normal query parameters', async () => {
+  const issueHome = '<html><body><input name="__VIEWSTATE">District of Columbia Register Browse through DCR Issues<a href="/Common/DCR/Issues/IssueDetailPage.aspx?issueID=1209">September 18, 2026</a></body></html>';
+  const issueDetail = '<html><body>District of Columbia Register<a href="IssueCategoryList.aspx?CategoryID=16&amp;IssueID=1209">Public Hearings</a></body></html>';
+  const calls = [];
+  await withEnvFetch({ CRON_SECRET: secret }, standardFetch((url) => {
+    calls.push(url);
+    if (url === 'https://www.dcregs.dc.gov/') return response(issueHome, { url });
+    if (url.includes('IssueDetailPage.aspx')) return response(issueDetail, { url });
+    if (url.includes('IssueCategoryList.aspx')) return response(category, { url });
+    return null;
+  }), async () => {
+    const out = res(); await route.default(request(), out);
+    const accepted = out.body.issueDiscovery.categoryUrls[0];
+    assert.equal(accepted, 'https://www.dcregs.dc.gov/Common/DCR/Issues/IssueCategoryList.aspx?CategoryID=16&IssueID=1209');
+    const parsed = new URL(accepted);
+    assert.equal(parsed.searchParams.get('CategoryID'), '16'); assert.equal(parsed.searchParams.get('IssueID'), '1209');
+    assert.equal(calls.some(url => url.includes('amp%3BIssueID') || url.includes('amp;IssueID')), false);
+    assert.equal(out.body.issueDiscovery.noticeCount, 1); assert.equal(out.body.conclusion.issueEnumerationViable, true);
+  });
+});
+
 test('external form action is reported as rejected and never fetched', async () => {
   const altered = n539.replace('<body>', '<body><form action="https://evil.test/submit">');
   const calls = [];
