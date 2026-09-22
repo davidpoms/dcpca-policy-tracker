@@ -7,13 +7,37 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
-const html = read('index.html');
+const html = read('frontend/app.jsx');
+const page = read('index.html');
 
 function functionBody(name) {
   const match = html.match(new RegExp(`const ${name} = async \\([^)]*\\) => \\{([\\s\\S]*?)\\n            \\};`));
   assert.ok(match, name);
   return match[1];
 }
+
+test('page shell loads one external Babel entry after CDN and classic scripts', () => {
+  const sources = [...page.matchAll(/<script\b[^>]*\bsrc="([^"]+)"[^>]*><\/script>/g)].map(match => match[1]);
+  assert.deepEqual(sources, [
+    'https://unpkg.com/react@18.3.1/umd/react.production.min.js',
+    'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js',
+    'https://unpkg.com/@babel/standalone@7.23.10/babel.min.js',
+    'https://cdn.tailwindcss.com/3.4.1',
+    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js',
+    'frontend/lims-normalization.js',
+    'frontend/lims-activity.js',
+    'frontend/lims-hearings.js',
+    'frontend/api-client.js',
+    'frontend/app.jsx'
+  ]);
+  assert.match(page, /<script type="text\/babel" src="frontend\/app\.jsx"><\/script>/);
+  assert.doesNotMatch(page, /<script type="text\/babel">/);
+  assert.equal((page.match(/type="text\/babel"/g) || []).length, 1);
+  assert.doesNotMatch(page, /function App\(|function DCPolicyTracker\(|initializeSupabase\(/);
+  assert.match(html, /function App\(\)/);
+  assert.match(html, /function DCPolicyTracker\(\{ onLogout \}\)/);
+  assert.match(html, /const root = ReactDOM\.createRoot\(document\.getElementById\('root'\)\);[\s\S]*?initializeSupabase\(\)[\s\S]*?\.then\(\(\) => root\.render\(<App \/>\)\)/);
+});
 
 test('app-data transport sends the exact JSON POST and returns the raw response', async () => {
   const payload = { action: 'trackedItem.activity.markSeen', itemId: 'B26/123', value: null };
@@ -107,11 +131,11 @@ test('all LIMS proxy callers retain their own failure and continuation behavior'
   const quick = functionBody('quickSearchByCategory');
   assert.match(quick, /window\.DCPCAFrontend\.proxyFetch\('\/SearchLegislation', 'POST'/);
   assert.match(quick, /setError\('Failed to search: ' \+ err\.message\)/);
-  assert.match(html, /<script src="frontend\/api-client\.js"><\/script>\s*<script type="text\/babel">/);
+  assert.match(page, /<script src="frontend\/api-client\.js"><\/script>\s*<script type="text\/babel" src="frontend\/app\.jsx"><\/script>/);
 });
 
 test('all app-data callers use the transport and the classic script loads before Babel', () => {
-  assert.match(html, /<script src="frontend\/lims-hearings\.js"><\/script>\s*<script src="frontend\/api-client\.js"><\/script>\s*<script type="text\/babel">/);
+  assert.match(page, /<script src="frontend\/lims-hearings\.js"><\/script>\s*<script src="frontend\/api-client\.js"><\/script>\s*<script type="text\/babel" src="frontend\/app\.jsx"><\/script>/);
   assert.doesNotMatch(html, /fetch\(['"]\/api\/app-data['"]/);
   assert.equal((html.match(/window\.DCPCAFrontend\.appDataRequest\(/g) || []).length, 28);
   for (const name of [

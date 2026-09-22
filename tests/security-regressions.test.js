@@ -668,16 +668,17 @@ test('api/app-data.js returns a generic 500 when the Supabase write fails', asyn
 
 test('repository guardrails block historical secret drift and keep the app-data slice within API limits', () => {
   const apiFiles = collectApiFiles().map((file) => `api/${file}`);
-  const appFiles = ['index.html', ...apiFiles];
+  const appFiles = ['index.html', 'frontend/app.jsx', ...apiFiles];
   const appText = appFiles.map((relativePath) => readRepoText(relativePath)).join('\n');
+  const clientText = [readRepoText('index.html'), readRepoText('frontend/app.jsx')].join('\n');
 
   assert.ok(apiFiles.length <= 12, `Expected /api count <= 12, got ${apiFiles.length}`);
   assert.doesNotMatch(appText, /dcpcapolicyhearingtracker/i);
-  assert.doesNotMatch(readRepoText('index.html'), /https:\/\/[^\s"'<>]*\.supabase\.co/i);
-  assert.doesNotMatch(readRepoText('index.html'), /sb_publishable_[A-Za-z0-9_-]+/i);
-  assert.doesNotMatch(readRepoText('index.html'), /https:\/\/dcpca-policy-tracker\.vercel\.app/i);
+  assert.doesNotMatch(clientText, /https:\/\/[^\s"'<>]*\.supabase\.co/i);
+  assert.doesNotMatch(clientText, /sb_publishable_[A-Za-z0-9_-]+/i);
+  assert.doesNotMatch(clientText, /https:\/\/dcpca-policy-tracker\.vercel\.app/i);
   assert.doesNotMatch(readRepoText('api/build-bill-cache.js'), /https:\/\/dcpca-policy-tracker\.vercel\.app/i);
-  assert.doesNotMatch(readRepoText('index.html'), /from\('tracked_keywords'\)\s*\.\s*(insert|delete)|from\('tracked_committees'\)\s*\.\s*(insert|delete)|from\('tracked_sponsors'\)\s*\.\s*(insert|delete)|from\('tracked_agencies'\)\s*\.\s*(insert|delete)/i);
+  assert.doesNotMatch(readRepoText('frontend/app.jsx'), /from\('tracked_keywords'\)\s*\.\s*(insert|delete)|from\('tracked_committees'\)\s*\.\s*(insert|delete)|from\('tracked_sponsors'\)\s*\.\s*(insert|delete)|from\('tracked_agencies'\)\s*\.\s*(insert|delete)/i);
 
   for (const relativePath of apiFiles) {
     const content = readRepoText(relativePath);
@@ -763,7 +764,7 @@ test('bill-status history RLS keeps anon SELECT and removes browser write polici
   const action = appData.match(/case 'trackedItem\.actionStatus\.update': \{([\s\S]*?)\n      \}/);
   assert.ok(action);
   assert.match(action[1], /supabaseTableRequest\(supabaseUrl, serviceKey, 'bill_status_history', 'POST'/);
-  assert.doesNotMatch(readRepoText('index.html'), /\.from\('bill_status_history'\)\s*\.\s*insert\s*\(/);
+  assert.doesNotMatch(readRepoText('frontend/app.jsx'), /\.from\('bill_status_history'\)\s*\.\s*insert\s*\(/);
 });
 
 test('tracked_items and activity_log RLS allow only anon reads after browser writes migrate', () => {
@@ -791,7 +792,7 @@ test('tracked_items and activity_log RLS allow only anon reads after browser wri
     'activity_log:anon can read activity_log', 'tracked_items:anon can read tracked_items'
   ]);
 
-  const html = readRepoText('index.html');
+  const html = readRepoText('frontend/app.jsx');
   assert.match(html, /\.from\('tracked_items'\)\.select/);
   assert.match(html, /\.from\('activity_log'\)\.select/);
   assert.doesNotMatch(html, /\.from\('tracked_items'\)\s*\.\s*(?:insert|update|delete)\s*\(/);
@@ -1016,7 +1017,7 @@ test('api/app-data.js implements opaque-ID team member mutation contracts', asyn
 });
 
 test('team member frontend mutations use app-data while reads and unrelated item writes remain direct', () => {
-  const appText = readRepoText('index.html');
+  const appText = readRepoText('frontend/app.jsx');
 
   assert.match(appText, /\.from\('team_members'\)\.select\('\*'\)/);
   assert.doesNotMatch(appText, /from\('team_members'\)\s*\.insert\(/i);
@@ -1164,7 +1165,7 @@ test('api/app-data.js implements the five tracked-item metadata action contracts
 });
 
 test('only the five metadata functions moved behind app-data', () => {
-  const appText = readRepoText('index.html');
+  const appText = readRepoText('frontend/app.jsx');
   const functionBlocks = [
     appText.match(/const updateAssignment = async \(itemId, newAssignee\) => \{([\s\S]*?)\n            \};/),
     appText.match(/const updatePriority = async \(itemId, newPriority\) => \{([\s\S]*?)\n            \};/),
@@ -1337,7 +1338,7 @@ test('api/app-data.js implements the tracked-item track/untrack contracts', asyn
 });
 
 test('toggleSelection uses app-data while remaining tracked-item writers stay direct', () => {
-  const appText = readRepoText('index.html');
+  const appText = readRepoText('frontend/app.jsx');
   const toggleBlock = appText.match(/const toggleSelection = async \(itemId\) => \{([\s\S]*?)\n            \};/);
 
   assert.ok(toggleBlock);
@@ -1354,7 +1355,7 @@ test('toggleSelection uses app-data while remaining tracked-item writers stay di
 });
 
 test('manual-entry functions use app-data while action-status and hearing actions remain scoped', () => {
-  const appText = readRepoText('index.html');
+  const appText = readRepoText('frontend/app.jsx');
   for (const [name, action] of [
     ['addManualEntry', 'create'], ['updateManualEntry', 'update'], ['deleteManualEntry', 'delete']
   ]) {
@@ -1603,7 +1604,7 @@ test('detected activity API preserves exact PATCH, audit, auth and failure behav
 });
 
 test('detected activity and hearing flows use app-data', () => {
-  const html = readRepoText('index.html');
+  const html = readRepoText('frontend/app.jsx');
   const block = html.match(/const updateItemActivity = async \([^)]*\) => \{([\s\S]*?)\n            \};/);
   assert.ok(block);
   assert.match(block[1], /action: 'trackedItem\.activity\.detected'/);
@@ -1693,7 +1694,7 @@ test('hearing persistence and batch audit use bounded server-side writes', async
 });
 
 test('hearing functions and detected activity have no direct browser table writes', () => {
-  const html = readRepoText('index.html');
+  const html = readRepoText('frontend/app.jsx');
   for (const [name, action] of [
     ['checkHearingsForTrackedItems', 'trackedItem.hearing.persist'],
     ['checkHearingForItem', 'trackedItem.hearing.persist'],
@@ -1885,7 +1886,7 @@ test('api/app-data.js treats note activity logging as nonfatal and note DB failu
 
 
 test('repository guardrails keep note mutations behind the authenticated API and preserve direct item_notes reads', () => {
-  const appText = readRepoText('index.html');
+  const appText = readRepoText('frontend/app.jsx');
 
   assert.match(appText, /from\('item_notes'\)\.select\('\*'\)/);
   assert.match(appText, /action:\s*'note\.save'/);
@@ -1899,7 +1900,7 @@ test('repository guardrails keep note mutations behind the authenticated API and
 });
 
 test('frontend committee normalization keeps array data safe at the render boundary', () => {
-  const appText = readRepoText('index.html');
+  const appText = readRepoText('frontend/app.jsx');
   const normalization = readRepoText('frontend/lims-normalization.js');
 
   assert.match(normalization, /const normalizeCommittees = \(value\) => \{/);

@@ -6,7 +6,8 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const html = fs.readFileSync(path.join(root, 'frontend/app.jsx'), 'utf8');
+const page = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const normalization = fs.readFileSync(path.join(root, 'frontend/lims-normalization.js'), 'utf8');
 const fixtures = JSON.parse(fs.readFileSync(path.join(root, 'tests/fixtures/lims-characterization.json'), 'utf8'));
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -78,7 +79,7 @@ test('both browser searches and hearing checks use shared local helpers without 
     assert.match(block[1], /window\.DCPCAFrontend\.parseMembers\(details\.coIntroducers\)/);
     assert.doesNotMatch(block[1], /const parseMembers =/);
   }
-  assert.match(html, /<script src="frontend\/lims-normalization\.js"><\/script>\s*<script src="frontend\/lims-activity\.js"><\/script>\s*<script src="frontend\/lims-hearings\.js"><\/script>\s*<script src="frontend\/api-client\.js"><\/script>\s*<script type="text\/babel">/);
+  assert.match(page, /<script src="frontend\/lims-normalization\.js"><\/script>\s*<script src="frontend\/lims-activity\.js"><\/script>\s*<script src="frontend\/lims-hearings\.js"><\/script>\s*<script src="frontend\/api-client\.js"><\/script>\s*<script type="text\/babel" src="frontend\/app\.jsx"><\/script>/);
   for (const name of ['normalizeCommittees', 'parseMembers', 'transformLimsSearchItem']) {
     assert.doesNotMatch(html, new RegExp(`const ${name} =`));
     assert.equal((normalization.match(new RegExp(`const ${name} =`, 'g')) || []).length, 1);

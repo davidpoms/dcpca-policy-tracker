@@ -18,7 +18,7 @@ class FixedDate extends Date {
 }
 
 function browser() {
-  const html = read('index.html');
+  const html = read('frontend/app.jsx');
   const isNewStart = html.indexOf('const isNewItem = (dateString) =>');
   const isNewEnd = html.indexOf('const quickSearchByCategory =', isNewStart);
   assert.ok(isNewStart >= 0 && isNewEnd > isNewStart);
@@ -57,10 +57,11 @@ function cronParsers() {
 function hearingDate(value) { return value?.date?.toISOString() || null; }
 
 test('browser LIMS helpers load before Babel and hearing checks use the extracted namespace', () => {
-  const html = read('index.html');
+  const html = read('frontend/app.jsx');
+  const page = read('index.html');
   const activity = read('frontend/lims-activity.js');
   const hearings = read('frontend/lims-hearings.js');
-  assert.match(html, /<script src="frontend\/lims-normalization\.js"><\/script>\s*<script src="frontend\/lims-activity\.js"><\/script>\s*<script src="frontend\/lims-hearings\.js"><\/script>\s*<script src="frontend\/api-client\.js"><\/script>\s*<script type="text\/babel">/);
+  assert.match(page, /<script src="frontend\/lims-normalization\.js"><\/script>\s*<script src="frontend\/lims-activity\.js"><\/script>\s*<script src="frontend\/lims-hearings\.js"><\/script>\s*<script src="frontend\/api-client\.js"><\/script>\s*<script type="text\/babel" src="frontend\/app\.jsx"><\/script>/);
   for (const name of ['extractLatestActivityDate', 'extractActivityTimeline']) {
     assert.match(activity, new RegExp(`function ${name}\\(details\\)`));
     assert.match(activity, new RegExp(`window\\.DCPCAFrontend\\.${name} = ${name};`));
