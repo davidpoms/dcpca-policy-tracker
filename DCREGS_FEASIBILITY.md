@@ -18,4 +18,6 @@ Invoke `GET https://<preview-host>/api/scrape-dcregs` with the exact `Authorizat
 
 Evaluate the `direct`, `scrapingBee`, `knownNoticeParsing`, `viewText`, `issueDiscovery`, and `conclusion` sections from the Preview runtime. A configured ScrapingBee key enables normal proxy requests and rendered-JS fallback only where the normal response is insufficient; an absent key is reported as `not configured` without failing the probe.
 
+Content validation is structural and page-specific. Broad block phrases can occur inside otherwise valid ASP.NET scripts or templates, so the classifier reports them as diagnostic `blockSignals` without overriding strong homepage or matching Notice Detail structure. ScrapingBee remains a fallback only when direct retrieval fails structural validation.
+
 This spike does **not** establish that ingestion is viable unless the September 18, 2026 issue is positively identified, a target issue or descended category page is fetched, and at least one notice is enumerated from that target chain. Generic browse-page notices and successful parsing of the two known individual notices do not count. No production workflow, tracked item, candidate record, report, schedule, or database table is created or modified.

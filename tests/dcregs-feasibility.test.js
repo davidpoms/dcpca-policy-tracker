@@ -10,14 +10,14 @@ const route = await import(`${pathToFileURL(routePath).href}?test=${Date.now()}`
 const secret = 'cron-test-secret';
 
 function noticeHtml({ id, category, subCategory = null, title }) {
-  return `<html><body><h1>${title}</h1><table><tr><td>Notice ID:</td><td>${id}</td></tr>
+  return `<html><body><div>District of Columbia Register</div><a href="/Common/NoticeDetail.aspx?NoticeId=${id}">Notice Detail</a><h1>${title}</h1><table><tr><td>Notice ID:</td><td>${id}</td></tr>
   <tr><td>Register Category:</td><td>${category}</td></tr>${subCategory ? `<tr><td>Sub Category:</td><td>${subCategory}</td></tr>` : ''}
   <tr><td>Agency:</td><td>Zoning, Office of</td></tr><tr><td>Register Issue:</td><td>9/18/2026, Vol 73/38</td></tr>
   <tr><td>Publish Date:</td><td>9/18/2026</td></tr></table><a href="/Common/ViewDocument.aspx?NoticeId=${id}">View text</a></body></html>`;
 }
 const n539 = noticeHtml({ id: 'N146539', category: 'Public Hearings', title: 'Public Hearing Notice' });
 const n506 = noticeHtml({ id: 'N146506', category: 'Notices, Opinions, and Orders', subCategory: 'Orders', title: 'Order Notice' });
-const home = `<html><body>District of Columbia Register Browse through DCR Issues
+const home = `<html><body><input name="__VIEWSTATE" value="state">District of Columbia Register Search District of Columbia Register Browse through DCR Issues
 <a href="/issues.aspx?IssueID=73-38">September 18, 2026</a></body></html>`;
 const issue = `<html><body>District of Columbia Register<a href="/category.aspx?IssueID=73-38&CategoryID=1">Rules</a></body></html>`;
 const category = `<html><body>District of Columbia Register<a href="/Common/NoticeDetail.aspx?NoticeId=N150000">Target notice</a></body></html>`;
@@ -78,12 +78,39 @@ test('external form action is reported as rejected and never fetched', async () 
 });
 
 test('classifier and both known notice shapes remain characterized', () => {
-  assert.equal(route.classifyDcRegsResponse(home, 200).realContent, true);
-  assert.equal(route.classifyDcRegsResponse('<html>Access denied verify you are human</html>', 200).kind, 'challenge-or-block');
+  assert.equal(route.classifyDcRegsResponse(home, 200, 'https://www.dcregs.dc.gov/').realContent, true);
+  assert.equal(route.classifyDcRegsResponse('<html>Access denied verify you are human</html>', 200, 'https://www.dcregs.dc.gov/').kind, 'challenge-or-block');
   const first = route.parseNoticeMetadata(n539, 'https://dcregs.dc.gov/x');
   assert.equal(first.noticeId, 'N146539'); assert.equal(first.registerCategory, 'Public Hearings'); assert.equal(first.agency, 'Zoning, Office of');
   const second = route.parseNoticeMetadata(n506, 'https://dcregs.dc.gov/x');
   assert.equal(second.noticeId, 'N146506'); assert.equal(second.subCategory, 'Orders');
+});
+
+test('structural validation overrides incidental block phrases on valid pages', () => {
+  const homepage = home.replace('</body>', '<script>const message = "request blocked";</script></body>');
+  const homeResult = route.classifyDcRegsResponse(homepage, 200, 'https://www.dcregs.dc.gov/');
+  assert.equal(homeResult.realContent, true); assert.deepEqual(homeResult.blockSignals, ['request blocked']);
+  assert.equal(homeResult.structuralValidationType, 'dc-register-homepage');
+
+  const notice = n539.replace('</body>', '<script>const message = "request blocked";</script></body>');
+  const noticeResult = route.classifyDcRegsResponse(notice, 200, 'https://dcregs.dc.gov/Common/NoticeDetail.aspx?NoticeId=N146539');
+  assert.equal(noticeResult.realContent, true); assert.equal(noticeResult.expectedNoticeIdMatched, true);
+  assert.deepEqual(noticeResult.blockSignals, ['request blocked']);
+  assert.equal(noticeResult.structuralValidationType, 'dc-register-notice-detail');
+});
+
+test('notice validation rejects challenge shells, wrong IDs, and weak generic HTML', () => {
+  const target = 'https://dcregs.dc.gov/Common/NoticeDetail.aspx?NoticeId=N146539';
+  const shell = '<html><body>District of Columbia Register NoticeDetail.aspx request blocked verify you are human</body></html>';
+  const shellResult = route.classifyDcRegsResponse(shell, 200, target);
+  assert.equal(shellResult.realContent, false); assert.equal(shellResult.kind, 'challenge-or-block');
+  assert.equal(shellResult.expectedNoticeIdMatched, false);
+
+  const wrong = route.classifyDcRegsResponse(n506, 200, target);
+  assert.equal(wrong.realContent, false); assert.equal(wrong.expectedNoticeId, 'N146539'); assert.equal(wrong.expectedNoticeIdMatched, false);
+
+  const weak = route.classifyDcRegsResponse('<html><body>District of Columbia Register</body></html>', 200, 'https://dcregs.dc.gov/other.aspx');
+  assert.equal(weak.realContent, false); assert.equal(weak.kind, 'unexpected-content');
 });
 
 test('external redirect is rejected without following it', async () => {

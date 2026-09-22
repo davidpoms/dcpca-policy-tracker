@@ -69,7 +69,7 @@ async function probe(value, mode, key, counts, renderJs, timeout = TIMEOUT) {
       targetUrl, status: result.response.status, finalUrl: result.finalUrl,
       contentType: result.response.headers?.get?.('content-type') || null,
       characterLength: body.length, byteLength: data.byteLength,
-      contentValidation: classifyDcRegsResponse(body, result.response.status), body
+      contentValidation: classifyDcRegsResponse(body, result.response.status, targetUrl), body
     };
   } catch (error) {
     const kind = error.code === 'SIZE' ? 'response-too-large' : error.code === 'URL' ? 'url-rejected' : error.name === 'AbortError' ? 'timeout' : 'request-error';
@@ -155,18 +155,38 @@ export function allowedDcRegsUrl(value, base = HOME) {
   } catch { return null; }
 }
 
-export function classifyDcRegsResponse(html, status) {
+export function classifyDcRegsResponse(html, status, targetUrl = '') {
   const text = String(html || ''); const lower = text.toLowerCase();
   const markers = {
     dcRegsTitle: /district of columbia municipal regulations|district of columbia register/i.test(text),
     noticeId: /notice\s*id|noticeid/i.test(text), noticeDetail: /noticedetail\.aspx/i.test(text),
-    issueBrowse: /browse through dcr issues/i.test(text), aspNet: /__viewstate|__eventtarget/i.test(text)
+    issueBrowse: /browse through dcr issues/i.test(text),
+    registerSearch: /search\s+(?:the\s+)?district of columbia register|search\s+by\s+(?:agency|council|notice id|section number)/i.test(text),
+    aspNet: /__viewstate|__eventtarget|\.aspx/i.test(text)
   };
-  const blocked = /access denied|captcha|cloudflare|attention required|verify you are human|request blocked|incapsula/i.test(lower);
+  const blockSignals = ['access denied', 'captcha', 'cloudflare', 'attention required', 'verify you are human', 'request blocked', 'incapsula'].filter(token => lower.includes(token));
   const generic = /internal server error|runtime error|server error in '\/' application|service unavailable/i.test(lower);
   const empty = text.trim().length < 40;
-  const realContent = status >= 200 && status < 300 && !blocked && !generic && !empty && Object.values(markers).some(Boolean);
-  return { realContent, kind: realContent ? 'real-content' : blocked ? 'challenge-or-block' : generic ? 'generic-error' : empty ? 'empty' : 'unexpected-content', markers };
+  const ok = status >= 200 && status < 300;
+  const parsedTarget = allowedDcRegsUrl(targetUrl);
+  const isNoticeDetail = Boolean(parsedTarget && /\/NoticeDetail\.aspx$/i.test(new URL(parsedTarget).pathname));
+  const isHomepage = parsedTarget === HOME;
+  const expectedNoticeId = isNoticeDetail ? new URL(parsedTarget).searchParams.get('NoticeId')?.toUpperCase() || null : null;
+  const metadata = isNoticeDetail ? parseNoticeMetadata(text, parsedTarget) : null;
+  const expectedNoticeIdMatched = expectedNoticeId ? metadata?.noticeId?.toUpperCase() === expectedNoticeId && new RegExp(escapeRegex(expectedNoticeId), 'i').test(text) : null;
+  const coreNoticeFields = metadata ? [metadata.registerCategory, metadata.agency, metadata.registerIssue, metadata.publishDate].filter(Boolean).length : 0;
+  let structuralValidationType = 'dc-register-discovery';
+  let structuralValid = markers.dcRegsTitle && markers.aspNet && (markers.issueBrowse || /(?:IssueID|CategoryID|NoticeId)=/i.test(text));
+  if (isHomepage) {
+    structuralValidationType = 'dc-register-homepage';
+    structuralValid = markers.dcRegsTitle && (markers.issueBrowse || markers.registerSearch) && markers.aspNet;
+  } else if (isNoticeDetail) {
+    structuralValidationType = 'dc-register-notice-detail';
+    structuralValid = markers.dcRegsTitle && (markers.noticeDetail || markers.noticeId) && expectedNoticeIdMatched && coreNoticeFields >= 3;
+  }
+  const realContent = ok && !empty && structuralValid;
+  const kind = realContent ? 'real-content' : !ok ? 'http-error' : empty ? 'empty' : blockSignals.length ? 'challenge-or-block' : generic ? 'generic-error' : 'unexpected-content';
+  return { realContent, kind, structuralValidationType, structuralValid, blockSignals, expectedNoticeId, expectedNoticeIdMatched, markers };
 }
 
 export function parseNoticeMetadata(html, source = '') {
@@ -295,3 +315,4 @@ function expose({ body, ...safe }) { return safe; }
 function failed(kind, error) { return { mode: null, targetUrl: null, status: null, finalUrl: null, contentType: null, characterLength: 0, byteLength: 0, contentValidation: { realContent: false, kind, markers: {} }, error, body: '' }; }
 function coded(message, code) { const error = new Error(message); error.code = code; return error; }
 function safeError(error, key) { let text = error instanceof Error ? error.message : 'Request failed'; text = text.replace(/https:\/\/app\.scrapingbee\.com\/[^\s"']*/gi, '[scrapingbee-url-redacted]').replace(/api_key=[^&\s]+/gi, 'api_key=[redacted]'); if (key) text = text.split(key).join('[redacted]'); return text.slice(0, 300); }
+function escapeRegex(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
