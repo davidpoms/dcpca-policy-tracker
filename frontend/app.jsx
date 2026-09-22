@@ -188,6 +188,16 @@
             );
         }
 
+        function formatActivityLogTimestamp(value) {
+            if (typeof value !== 'string' || !value.trim()) return '';
+            const timestamp = value.trim();
+            const withTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp)
+                ? timestamp
+                : `${timestamp.replace(' ', 'T')}Z`;
+            const date = new Date(withTimezone);
+            return isNaN(date.getTime()) ? '' : date.toLocaleString(undefined, { timeZone: 'America/New_York' });
+        }
+
         function ActivityLogModal({ activityLog, onClose }) {
             return (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -205,7 +215,7 @@
                                             {log.item_title && <span className="text-sm text-gray-600 ml-2">- {log.item_title}</span>}
                                             {log.details && Object.keys(log.details).length > 0 && <div className="text-xs text-gray-500 mt-1">{JSON.stringify(log.details)}</div>}
                                         </div>
-                                        <span className="text-xs text-gray-400">{new Date(log.created_at).toLocaleString()}</span>
+                                        <span className="text-xs text-gray-400">{formatActivityLogTimestamp(log.created_at)}</span>
                                     </div>
                                 </div>
                             ))}
@@ -2170,4 +2180,3 @@
                 console.error('Failed to initialize the application:', error);
                 root.render(<div style={{ padding: 24, fontFamily: 'sans-serif' }}>Unable to load application configuration.</div>);
             });
-    

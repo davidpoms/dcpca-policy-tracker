@@ -31,7 +31,7 @@ test('ActivityLogModal retains ordered display fields, details, timestamp, empty
   assert.match(modal, /log\.action\.replace\(\/_\/g, ' '\)\.toUpperCase\(\)/);
   assert.match(modal, /log\.item_title &&[\s\S]*?\{log\.item_title\}/);
   assert.match(modal, /log\.details && Object\.keys\(log\.details\)\.length > 0[\s\S]*?JSON\.stringify\(log\.details\)/);
-  assert.match(modal, /new Date\(log\.created_at\)\.toLocaleString\(\)/);
+  assert.match(modal, /formatActivityLogTimestamp\(log\.created_at\)/);
   assert.match(modal, /activityLog\.length === 0 &&[\s\S]*?No activity recorded yet/);
   assert.match(modal, /className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"/);
   assert.match(modal, /onClick=\{onClose\}/);

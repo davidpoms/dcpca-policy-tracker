@@ -169,7 +169,7 @@ create table if not exists public.activity_log (
   item_id text,
   item_title text,
   details jsonb,
-  created_at timestamp without time zone default now()
+  created_at timestamptz default now()
 );
 
 create index if not exists idx_activity_log_item

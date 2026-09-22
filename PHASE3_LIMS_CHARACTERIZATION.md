@@ -14,6 +14,8 @@ The first React presentation extraction keeps `HearingReportPanel` in `frontend/
 
 `ActivityLogModal` is the next presentation component in `frontend/app.jsx`. It receives only the ordered `activityLog` entries and an `onClose` callback. `DCPolicyTracker` retains the modal condition, activity state, and the existing `loadActivityLog()` call when the header button opens it.
 
+Activity Log historically stored UTC wall-clock values in a `timestamp without time zone` column. The 2026-09-22 migration interprets existing values as UTC and converts `created_at` to `timestamptz`; the Activity Log UI displays both migrated and legacy timestamps in `America/New_York` while keeping the browser's normal locale formatting.
+
 Fixtures that protect intentional differences:
 
 | Fixture | Browser behavior | Cron behavior |
