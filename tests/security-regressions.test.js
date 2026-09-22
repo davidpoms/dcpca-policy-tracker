@@ -720,7 +720,9 @@ test('config-table RLS keeps anon reads and removes anon writes', () => {
     'trackedItem.manual.update',
     'trackedItem.manual.delete',
     'trackedItem.actionStatus.update',
-    'trackedItem.activity.detected'
+    'trackedItem.activity.detected',
+    'trackedItem.hearing.persist',
+    'trackedItem.hearings.audit'
   ];
   const actionBlock = appData.match(/const ALLOWED_ACTIONS = new Set\(\[([\s\S]*?)\]\);/);
 
@@ -988,7 +990,7 @@ test('team member frontend mutations use app-data while reads and unrelated item
   assert.match(appText, /teamMemberId:\s*String\(editingTeamMember\)/);
   assert.match(appText, /teamMemberId:\s*String\(memberId\)/);
   assert.doesNotMatch(appText, /supabase\.from\('tracked_items'\)\.update\(\{ assigned_to: teamMemberForm\.name \}\)/);
-  assert.match(appText, /const checkHearingsForTrackedItems = async[\s\S]*?supabase\.from\('tracked_items'\)\.update\(\{\s*hearing_checked_at: now/);
+  assert.match(appText, /const checkHearingsForTrackedItems = async[\s\S]*?action: 'trackedItem\.hearing\.persist'/);
 });
 
 test('api/app-data.js implements the five tracked-item metadata action contracts', async () => {
@@ -1149,7 +1151,7 @@ test('only the five metadata functions moved behind app-data', () => {
   assert.match(appText, /const updateActionStatus = async/);
   assert.match(appText, /const checkHearingsForTrackedItems = async/);
   assert.match(appText, /const addManualEntry = async/);
-  assert.match(appText, /supabase\.from\('tracked_items'\)\.update/);
+  assert.match(appText, /action: 'trackedItem\.hearing\.persist'/);
 });
 
 test('api/app-data.js implements the tracked-item track/untrack contracts', async () => {
@@ -1311,10 +1313,10 @@ test('toggleSelection uses app-data while remaining tracked-item writers stay di
   assert.match(appText, /const addManualEntry = async/);
   assert.match(appText, /const updateActionStatus = async/);
   assert.match(appText, /const checkHearingsForTrackedItems = async/);
-  assert.match(appText, /supabase\.from\('tracked_items'\)\.update/);
+  assert.match(appText, /action: 'trackedItem\.hearing\.persist'/);
 });
 
-test('manual-entry functions use app-data while action-status and hearing writers remain direct', () => {
+test('manual-entry functions use app-data while action-status and hearing actions remain scoped', () => {
   const appText = readRepoText('index.html');
   for (const [name, action] of [
     ['addManualEntry', 'create'], ['updateManualEntry', 'update'], ['deleteManualEntry', 'delete']
@@ -1331,7 +1333,7 @@ test('manual-entry functions use app-data while action-status and hearing writer
   assert.doesNotMatch(actionStatusBlock[1], /supabase\.from\('(tracked_items|bill_status_history)'\)|logActivity\(/);
   assert.match(actionStatusBlock[1], /response\.ok \|\| data\?\.trackedItemUpdated === true/);
   assert.match(actionStatusBlock[1], /setItems\(items\.map/);
-  assert.match(appText, /const checkHearingsForTrackedItems = async[\s\S]*?supabase\.from\('tracked_items'\)\.update/);
+  assert.match(appText, /const checkHearingsForTrackedItems = async[\s\S]*?action: 'trackedItem\.hearing\.persist'/);
 });
 
 test('manual-entry API preserves payloads, audit behavior, auth and generic failures', async () => {
@@ -1536,16 +1538,112 @@ test('detected activity API preserves exact PATCH, audit, auth and failure behav
   } finally { global.fetch = originalFetch; }
 });
 
-test('detected activity uses app-data while hearing browser writes and audit remain', () => {
+test('detected activity and hearing flows use app-data', () => {
   const html = readRepoText('index.html');
   const block = html.match(/const updateItemActivity = async \([^)]*\) => \{([\s\S]*?)\n            \};/);
   assert.ok(block);
   assert.match(block[1], /action: 'trackedItem\.activity\.detected'/);
   assert.doesNotMatch(block[1], /supabase\.from\('tracked_items'\)|logActivity\(/);
   for (const name of ['checkHearingsForTrackedItems', 'checkHearingForItem']) {
-    assert.match(html, new RegExp(`const ${name} = async[\\s\\S]*?supabase\\.from\\('tracked_items'\\)\\.update\\(`));
+    assert.match(html, new RegExp(`const ${name} = async[\\s\\S]*?action: 'trackedItem\\.hearing\\.persist'`));
   }
-  assert.match(html, /await logActivity\('hearings_checked', null, null, \{ checked: trackedIds\.length, withUpcoming: withHearings \}\)/);
+  assert.match(html, /action: 'trackedItem\.hearings\.audit', checked: trackedIds\.length, withUpcoming: withHearings/);
+});
+
+test('hearing persistence and batch audit use bounded server-side writes', async () => {
+  const handler = await importFresh('api/app-data.js');
+  const { createSignedSession } = await importFreshModule('lib/session.js');
+  const originalFetch = global.fetch;
+  const calls = [];
+  let failedTable = null;
+  global.fetch = async (url, init = {}) => {
+    calls.push({ url, method: init.method, headers: init.headers, body: init.body ? JSON.parse(init.body) : undefined });
+    return { ok: !url.includes(`/${failedTable}`), status: 500 };
+  };
+  const persist = {
+    action: 'trackedItem.hearing.persist', itemId: 'B26/123',
+    hearingCheckedAt: '2026-09-21T12:00:00.000Z', nextHearingDate: null,
+    hearingType: null, hearingLocation: null, additionalInformation: null,
+    committeeReReferral: null, latestActivityDate: null, latestActivityLabel: null,
+    activityCount: 0, activityTimeline: null, coIntroducers: null
+  };
+  const audit = { action: 'trackedItem.hearings.audit', checked: 3, withUpcoming: 1 };
+  const invoke = async (body, headers) => {
+    const res = makeRes();
+    await handler({ method: 'POST', headers, body: JSON.stringify(body) }, res);
+    return res;
+  };
+  try {
+    await withEnv({ SESSION_SECRET: 'hearing-secret', SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_KEY: 'service-key' }, async () => {
+      const headers = { cookie: `dc_tracker_session=${encodeURIComponent(createSignedSession(Date.now() + 60000))}` };
+      assert.equal((await invoke(persist, {})).statusCode, 401);
+      assert.equal((await invoke(audit, {})).statusCode, 401);
+      for (const invalid of [
+        { ...persist, extra: true }, { ...persist, itemId: '' }, { ...persist, activityCount: '1' },
+        { ...persist, committeeReReferral: {} }, { ...persist, activityTimeline: {} },
+        { ...persist, introducedBy: null }, { ...persist, status: null },
+        Object.fromEntries(Object.entries(persist).filter(([key]) => key !== 'hearingType')),
+        { ...audit, extra: true }, { ...audit, checked: '3' }, { ...audit, withUpcoming: -1 }
+      ]) assert.equal((await invoke(invalid, headers)).statusCode, 400);
+
+      calls.length = 0;
+      assert.equal((await invoke(persist, headers)).statusCode, 200);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].url, 'https://example.supabase.co/rest/v1/tracked_items?id=eq.B26%2F123');
+      assert.equal(calls[0].method, 'PATCH');
+      assert.equal(calls[0].headers.Authorization, 'Bearer service-key');
+      assert.deepEqual(calls[0].body, {
+        hearing_checked_at: persist.hearingCheckedAt, next_hearing_date: null,
+        hearing_type: null, hearing_location: null, additional_information: null,
+        committee_re_referral: null, latest_activity_date: null, latest_activity_label: null,
+        activity_count: 0, activity_timeline: null, co_introducers: null
+      });
+      calls.length = 0;
+      const withOptional = { ...persist, committeeReReferral: [{ committeeName: 'A' }],
+        activityTimeline: [{ label: 'Hearing', extra: null }], introducedBy: 'Member',
+        status: 'Pending', coIntroducers: 'Other' };
+      assert.equal((await invoke(withOptional, headers)).statusCode, 200);
+      assert.deepEqual(calls[0].body.committee_re_referral, [{ committeeName: 'A' }]);
+      assert.deepEqual(calls[0].body.activity_timeline, [{ label: 'Hearing', extra: null }]);
+      assert.equal(calls[0].body.introduced_by, 'Member');
+      assert.equal(calls[0].body.status, 'Pending');
+      assert.equal(calls[0].body.co_introducers, 'Other');
+      calls.length = 0;
+      failedTable = 'tracked_items';
+      const failed = await invoke(persist, headers);
+      assert.equal(failed.statusCode, 500);
+      assert.deepEqual(failed.body, { error: 'Service unavailable' });
+      assert.equal(calls.length, 1);
+      failedTable = null;
+      calls.length = 0;
+      assert.equal((await invoke(audit, headers)).statusCode, 200);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].url, 'https://example.supabase.co/rest/v1/activity_log');
+      assert.equal(calls[0].method, 'POST');
+      assert.deepEqual(calls[0].body, { action: 'hearings_checked', item_id: null, item_title: null,
+        details: { checked: 3, withUpcoming: 1 } });
+      failedTable = 'activity_log';
+      assert.equal((await invoke(audit, headers)).statusCode, 200);
+    });
+  } finally { global.fetch = originalFetch; }
+});
+
+test('hearing functions and detected activity have no direct browser table writes', () => {
+  const html = readRepoText('index.html');
+  for (const [name, action] of [
+    ['checkHearingsForTrackedItems', 'trackedItem.hearing.persist'],
+    ['checkHearingForItem', 'trackedItem.hearing.persist'],
+    ['updateItemActivity', 'trackedItem.activity.detected']
+  ]) {
+    const block = html.match(new RegExp(`const ${name} = async \\([^)]*\\) => \\{([\\s\\S]*?)\\n            \\};`));
+    assert.ok(block, name);
+    assert.match(block[1], new RegExp(`action: '${action.replaceAll('.', '\\.')}'`));
+    assert.doesNotMatch(block[1], /supabase\.from\('(tracked_items|activity_log)'\)/);
+    if (name === 'checkHearingsForTrackedItems') assert.doesNotMatch(block[1], /logActivity\('hearings_checked'/);
+  }
+  assert.match(html, /action: 'trackedItem\.hearings\.audit'/);
+  assert.doesNotMatch(html, /\.from\('(?:tracked_items|activity_log)'\)\s*\.\s*(?:insert|update|delete)\s*\(/);
+  assert.match(readRepoText('api/check-hearings.js'), /await sbPatch\('tracked_items', item\.id/);
 });
 
 test('api/app-data.js accepts and validates note.save and note.delete payloads', async () => {

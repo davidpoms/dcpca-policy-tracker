@@ -528,13 +528,6 @@
                 }
             };
 
-            const logActivity = async (action, itemId, itemTitle, details = {}) => {
-                try {
-                    const { error } = await supabase.from('activity_log').insert({ action, item_id: itemId, item_title: itemTitle, details });
-                    if (error) console.error('Error logging activity:', error);
-                } catch (err) { console.error('Error logging activity:', err); }
-            };
-
             const loadActivityLog = async () => {
                 try {
                     const { data, error } = await supabase.from('activity_log').select('*')
@@ -617,21 +610,28 @@
                             const coIntroducers = parseMembers(details.coIntroducers) || null;
 
                             newHearingData[id] = { ...hearing, checkedAt: now };
-                            await supabase.from('tracked_items').update({
-                                hearing_checked_at: now,
-                                next_hearing_date: hearing.date ? hearing.date.toISOString() : null,
-                                hearing_type: hearing.type || null,
-                                hearing_location: hearing.location || null,
-                                additional_information: details.additionalInformation || null,
-                                committee_re_referral: reReferrals.length > 0 ? reReferrals : null,
-                                latest_activity_date: latestActivityDate,
-                                latest_activity_label: latestActivityLabel,
-                                activity_count: activityCount,
-                                activity_timeline: activityTimeline.length > 0 ? activityTimeline : null,
-                                ...(introducedBy ? { introduced_by: introducedBy } : {}),
-                                co_introducers: coIntroducers,
-                                ...(details.status ? { status: details.status } : {})
-                            }).eq('id', id);
+                            const response = await fetch('/api/app-data', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'same-origin',
+                                body: JSON.stringify({
+                                    action: 'trackedItem.hearing.persist', itemId: id,
+                                    hearingCheckedAt: now,
+                                    nextHearingDate: hearing.date ? hearing.date.toISOString() : null,
+                                    hearingType: hearing.type || null,
+                                    hearingLocation: hearing.location || null,
+                                    additionalInformation: details.additionalInformation || null,
+                                    committeeReReferral: reReferrals.length > 0 ? reReferrals : null,
+                                    latestActivityDate: latestActivityDate,
+                                    latestActivityLabel: latestActivityLabel,
+                                    activityCount: activityCount,
+                                    activityTimeline: activityTimeline.length > 0 ? activityTimeline : null,
+                                    ...(introducedBy ? { introducedBy } : {}),
+                                    coIntroducers: coIntroducers,
+                                    ...(details.status ? { status: details.status } : {})
+                                })
+                            });
+                            if (!response.ok) throw new Error('Failed to persist hearing');
 
                             setItems(prev => prev.map(i => i.id === id ? {
                                 ...i,
@@ -658,7 +658,15 @@
                 setCheckingHearings(false);
                 setShowHearingPanel(true);
                 const withHearings = Object.values(newHearingData).filter(h => h.date && !h.isPast).length;
-                await logActivity('hearings_checked', null, null, { checked: trackedIds.length, withUpcoming: withHearings });
+                try {
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'trackedItem.hearings.audit', checked: trackedIds.length, withUpcoming: withHearings })
+                    });
+                    if (!response.ok) console.error('Error logging activity:', response.status);
+                } catch (err) { console.error('Error logging activity:', err); }
             };
 
             const checkHearingForItem = async (itemId) => {
@@ -693,21 +701,28 @@
                         coIntroducers: coIntroducers,
                         status: details.status || i.status
                     } : i));
-                    await supabase.from('tracked_items').update({
-                        hearing_checked_at: now,
-                        next_hearing_date: hearing.date ? hearing.date.toISOString() : null,
-                        hearing_type: hearing.type || null,
-                        hearing_location: hearing.location || null,
-                        additional_information: details.additionalInformation || null,
-                        committee_re_referral: reReferrals.length > 0 ? reReferrals : null,
-                        latest_activity_date: latestActivityDate,
-                        latest_activity_label: latestActivityLabel,
-                        activity_count: activityCount,
-                        activity_timeline: activityTimeline.length > 0 ? activityTimeline : null,
-                        ...(introducedBy ? { introduced_by: introducedBy } : {}),
-                        co_introducers: coIntroducers,
-                        ...(details.status ? { status: details.status } : {})
-                    }).eq('id', itemId);
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({
+                            action: 'trackedItem.hearing.persist', itemId,
+                            hearingCheckedAt: now,
+                            nextHearingDate: hearing.date ? hearing.date.toISOString() : null,
+                            hearingType: hearing.type || null,
+                            hearingLocation: hearing.location || null,
+                            additionalInformation: details.additionalInformation || null,
+                            committeeReReferral: reReferrals.length > 0 ? reReferrals : null,
+                            latestActivityDate: latestActivityDate,
+                            latestActivityLabel: latestActivityLabel,
+                            activityCount: activityCount,
+                            activityTimeline: activityTimeline.length > 0 ? activityTimeline : null,
+                            ...(introducedBy ? { introducedBy } : {}),
+                            coIntroducers: coIntroducers,
+                            ...(details.status ? { status: details.status } : {})
+                        })
+                    });
+                    if (!response.ok) throw new Error('Failed to persist hearing');
                 } catch (err) { console.error(`Error checking hearing for ${itemId}:`, err); }
             };
 

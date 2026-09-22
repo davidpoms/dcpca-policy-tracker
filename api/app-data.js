@@ -25,7 +25,9 @@ const ALLOWED_ACTIONS = new Set([
   'trackedItem.manual.update',
   'trackedItem.manual.delete',
   'trackedItem.actionStatus.update',
-  'trackedItem.activity.detected'
+  'trackedItem.activity.detected',
+  'trackedItem.hearing.persist',
+  'trackedItem.hearings.audit'
 ]);
 
 function isExactBody(body, allowedKeys) {
@@ -541,6 +543,61 @@ export default async function handler(req, res) {
         }, `?id=eq.${encodeURIComponent(body.itemId)}`);
         await logActivityEvent(supabaseUrl, serviceKey, 'activity_detected',
           body.itemId, null, { summary: body.activitySummary });
+        return res.status(200).json({ ok: true });
+      }
+
+      case 'trackedItem.hearing.persist': {
+        const keys = [
+          'action', 'itemId', 'hearingCheckedAt', 'nextHearingDate', 'hearingType',
+          'hearingLocation', 'additionalInformation', 'committeeReReferral',
+          'latestActivityDate', 'latestActivityLabel', 'activityCount',
+          'activityTimeline', 'coIntroducers'
+        ];
+        const optionalKeys = ['introducedBy', 'status'].filter(key => Object.hasOwn(body, key));
+        const nullableText = value => typeof value === 'string' || value === null;
+        if (!isExactBody(body, [...keys, ...optionalKeys]) ||
+            typeof body.itemId !== 'string' || body.itemId.trim() === '' ||
+            typeof body.hearingCheckedAt !== 'string' ||
+            !nullableText(body.nextHearingDate) || !nullableText(body.hearingType) ||
+            !nullableText(body.hearingLocation) || !nullableText(body.additionalInformation) ||
+            !(Array.isArray(body.committeeReReferral) || body.committeeReReferral === null) ||
+            !nullableText(body.latestActivityDate) || !nullableText(body.latestActivityLabel) ||
+            typeof body.activityCount !== 'number' || !Number.isFinite(body.activityCount) ||
+            !(Array.isArray(body.activityTimeline) || body.activityTimeline === null) ||
+            !nullableText(body.coIntroducers) ||
+            (Object.hasOwn(body, 'introducedBy') && typeof body.introducedBy !== 'string') ||
+            (Object.hasOwn(body, 'status') && typeof body.status !== 'string')) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        const patch = {
+          hearing_checked_at: body.hearingCheckedAt,
+          next_hearing_date: body.nextHearingDate,
+          hearing_type: body.hearingType,
+          hearing_location: body.hearingLocation,
+          additional_information: body.additionalInformation,
+          committee_re_referral: body.committeeReReferral,
+          latest_activity_date: body.latestActivityDate,
+          latest_activity_label: body.latestActivityLabel,
+          activity_count: body.activityCount,
+          activity_timeline: body.activityTimeline,
+          co_introducers: body.coIntroducers
+        };
+        if (Object.hasOwn(body, 'introducedBy')) patch.introduced_by = body.introducedBy;
+        if (Object.hasOwn(body, 'status')) patch.status = body.status;
+        await supabaseTableRequest(supabaseUrl, serviceKey, 'tracked_items', 'PATCH',
+          patch, `?id=eq.${encodeURIComponent(body.itemId)}`);
+        return res.status(200).json({ ok: true });
+      }
+
+      case 'trackedItem.hearings.audit': {
+        if (!isExactBody(body, ['action', 'checked', 'withUpcoming']) ||
+            !Number.isInteger(body.checked) || body.checked < 0 ||
+            !Number.isInteger(body.withUpcoming) || body.withUpcoming < 0) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        await logActivityEvent(supabaseUrl, serviceKey, 'hearings_checked', null, null,
+          { checked: body.checked, withUpcoming: body.withUpcoming });
         return res.status(200).json({ ok: true });
       }
 

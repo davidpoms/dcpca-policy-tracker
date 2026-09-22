@@ -151,9 +151,18 @@ Status: IMPLEMENTED in `/api/app-data.js`. This slice moves only five simple met
 
 The browser still performs direct SELECTs. It now sends these five mutations through `/api/app-data` and updates local React state only after a successful API response. `summaryText || null` remains in the browser, so empty strings become `null` while whitespace-only strings remain strings.
 
-The canonical `tracked_items` and `activity_log` RLS policies have intentionally not changed. Hearing/activity enrichment remains a browser writer. RLS cannot be tightened until those direct writers are migrated.
+The canonical `tracked_items` and `activity_log` RLS policies have intentionally not changed. Hearing persistence and its audit have now moved behind the authenticated route; RLS tightening is a separate next slice.
 
-Remaining browser mutation paths: hearing persistence in `checkHearingsForTrackedItems()` and `checkHearingForItem()`, plus their `hearings_checked` activity logging.
+No direct browser `tracked_items` or `activity_log` INSERT, UPDATE, or DELETE remains in `index.html`. Browser SELECTs remain.
+
+### Hearing persistence slice
+
+Status: IMPLEMENTED in `/api/app-data.js` with two explicit actions. LIMS fetching, hearing selection, parsing, timelines, per-item continuation, progress, delay, and React state remain in the browser. The cron route is unchanged.
+
+- `trackedItem.hearing.persist`: exact item ID plus `hearingCheckedAt`, `nextHearingDate`, `hearingType`, `hearingLocation`, `additionalInformation`, `committeeReReferral`, `latestActivityDate`, `latestActivityLabel`, `activityCount`, `activityTimeline`, and `coIntroducers`. `introducedBy` and `status` are optional and PATCHed only when present. The server maps only these fields to the existing `tracked_items` columns and filters by exact ID. Nullable strings and arrays retain their values. No audit event is written. Primary failures return a generic error.
+- `trackedItem.hearings.audit`: exact `{ action, checked, withUpcoming }`; server best-effort logs `hearings_checked` with null item ID/title and `{ checked, withUpcoming }`. Audit failure is nonfatal.
+
+The batch function still persists before updating local item state. The single-item function still updates local state before persistence. The API now reports primary database failures, which enter each function's existing catch path; the former browser Supabase call did not inspect its returned error object. `tracked_items` and `activity_log` RLS are unchanged here. With no direct browser writes to either table remaining, their RLS tightening can be prepared in a separate slice.
 
 ### Detected-item activity slice
 
@@ -162,7 +171,7 @@ Status: IMPLEMENTED in `/api/app-data.js` as `trackedItem.activity.detected`.
 - Exact request: `{ action, itemId, newStatus, activitySummary, lastCheckedAt }`. The browser retains its existing ISO timestamp generation. The server requires a non-empty string item ID and string values for the other fields.
 - The server PATCHes only `last_status`, `has_new_activity: true`, `activity_summary`, and `last_checked_at` by exact item ID, then best-effort logs `activity_detected` with the item ID, null item title, and `{ summary: activitySummary }`.
 - A tracked-item failure returns a generic client error and skips the audit. An audit failure does not fail the action. The browser still logs an update error to the console and does not update local state in this function; the calling refresh flow retains its current local-state timing.
-- `checkHearingsForTrackedItems()` and `checkHearingForItem()` still directly PATCH `tracked_items`, and `hearings_checked` still uses the browser activity logger. `tracked_items` UPDATE and `activity_log` INSERT RLS cannot yet be tightened.
+- Hearing persistence and `hearings_checked` audit now use the explicit actions above. RLS tightening remains a separate slice.
 
 ### Manual-entry lifecycle slice
 
@@ -172,7 +181,7 @@ Status: IMPLEMENTED in `/api/app-data.js`. All requests require the signed sessi
 - `trackedItem.manual.update`: `{ action, itemId, title, agency, status, date, link, assignedTo, priority, actionStatus, noticeId, registerIssue, registerNotes, deadline }`. The server PATCHes only the existing manual-entry field allowlist by exact item ID: title, agency, status, date, link, assignment, priority, action status, notice/register fields, description equal to title, deadline, and `latest_activity_date` equal to `deadline || date || null`. Audit: best-effort `manual_entry_updated` with empty details.
 - `trackedItem.manual.delete`: `{ action, itemId }`. The browser keeps the existing confirmation. The server physically DELETEs the `tracked_items` row by exact item ID. Audit: best-effort `manual_entry_deleted` with null title and empty details.
 
-Each action returns `{ ok: true }`. The browser changes local items, selection, and edit state only after API success. `tracked_items` and `activity_log` RLS are unchanged. Hearing enrichment still writes from the browser, so `tracked_items` RLS cannot yet be tightened.
+Each action returns `{ ok: true }`. The browser changes local items, selection, and edit state only after API success. `tracked_items` and `activity_log` RLS are unchanged in this slice.
 
 ### Action-status slice
 
@@ -201,7 +210,7 @@ CREATE POLICY "anon can insert bill_status_history"
   ON bill_status_history FOR INSERT TO anon WITH CHECK (true);
 ```
 
-The direct `activity_log` browser helper remains for unmigrated flows. Assignment and priority audit writes for this slice now occur server-side; summary and mark-seen actions produce no activity event.
+The browser activity-log insert helper is no longer used and has been removed. Assignment and priority audit writes occur server-side; summary and mark-seen actions produce no activity event.
 
 ### tracked-item track/untrack lifecycle slice
 
@@ -227,7 +236,7 @@ Status: IMPLEMENTED in `/api/app-data.js`.
 - No `bill_status_history` write.
 - Response: `{ ok: true }`.
 
-The browser updates selection and tracked-item defaults only after the API succeeds. Direct browser writes for hearing/activity enrichment remain, so `tracked_items` write RLS and `activity_log` write RLS must remain unchanged for now.
+The browser updates selection and tracked-item defaults only after the API succeeds. `tracked_items` and `activity_log` write RLS are unchanged in this slice; tightening them is a separate next step.
 
 ### item_notes RLS inventory and rollout
 
