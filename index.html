@@ -1315,24 +1315,35 @@
                     latestActivityDate: manualEntry.deadline || manualEntry.date || null
                 };
                 try {
-                    const { error } = await supabase.from('tracked_items').insert({
-                        id: newItem.id, title: newItem.title, bill_number: null,
-                        category: newItem.category, status: newItem.status, committees: [],
-                        date: newItem.date, description: newItem.description, link: newItem.link,
-                        source: newItem.source, agency: newItem.agency, is_manual_entry: true,
-                        is_new: newItem.isNew, assigned_to: newItem.assignedTo, priority: newItem.priority,
-                        action_status: newItem.actionStatus, introduced_by: null,
-                        notice_id: newItem.noticeId, register_issue: newItem.registerIssue,
-                        register_notes: newItem.registerNotes,
-                        deadline: newItem.deadline || null,
-                        latest_activity_date: newItem.latestActivityDate
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({
+                            action: 'trackedItem.manual.create',
+                            itemId: newItem.id,
+                            title: newItem.title,
+                            agency: newItem.agency,
+                            status: newItem.status,
+                            date: newItem.date,
+                            link: newItem.link,
+                            assignedTo: newItem.assignedTo,
+                            priority: newItem.priority,
+                            actionStatus: newItem.actionStatus,
+                            noticeId: newItem.noticeId,
+                            registerIssue: newItem.registerIssue,
+                            registerNotes: newItem.registerNotes,
+                            deadline: newItem.deadline,
+                            isNew: newItem.isNew,
+                            latestActivityDate: newItem.latestActivityDate
+                        })
                     });
-                    if (error) throw error;
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to add manual entry');
                     setItems([newItem, ...items]);
                     const newSelected = new Set(selectedItems);
                     newSelected.add(newItem.id);
                     setSelectedItems(newSelected);
-                    await logActivity('manual_entry_added', newItem.id, newItem.title, { source: 'Municipal Register' });
                     setShowManualEntry(false);
                     setManualEntry(blankManual);
                 } catch (err) { setError('Failed to add manual entry: ' + err.message); }
@@ -1352,16 +1363,29 @@
                 if (!manualEntry.title.trim()) { alert('Please enter a title'); return; }
                 const blankManual = { title: '', agency: '', status: 'Published', date: new Date().toISOString().split('T')[0], link: '', assignedTo: 'Unassigned', priority: 'medium', actionStatus: 'action_needed', noticeId: '', registerIssue: '', registerNotes: '', deadline: '' };
                 try {
-                    const { error } = await supabase.from('tracked_items').update({
-                        title: manualEntry.title, agency: manualEntry.agency, status: manualEntry.status,
-                        date: manualEntry.date, link: manualEntry.link, assigned_to: manualEntry.assignedTo,
-                        priority: manualEntry.priority, action_status: manualEntry.actionStatus,
-                        notice_id: manualEntry.noticeId, register_issue: manualEntry.registerIssue,
-                        register_notes: manualEntry.registerNotes, description: manualEntry.title,
-                        deadline: manualEntry.deadline || null,
-                        latest_activity_date: manualEntry.deadline || manualEntry.date || null
-                    }).eq('id', editingManualEntry);
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({
+                            action: 'trackedItem.manual.update',
+                            itemId: editingManualEntry,
+                            title: manualEntry.title,
+                            agency: manualEntry.agency,
+                            status: manualEntry.status,
+                            date: manualEntry.date,
+                            link: manualEntry.link,
+                            assignedTo: manualEntry.assignedTo,
+                            priority: manualEntry.priority,
+                            actionStatus: manualEntry.actionStatus,
+                            noticeId: manualEntry.noticeId,
+                            registerIssue: manualEntry.registerIssue,
+                            registerNotes: manualEntry.registerNotes,
+                            deadline: manualEntry.deadline || null
+                        })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to update manual entry');
                     setItems(items.map(item => item.id === editingManualEntry
                         ? { ...item, title: manualEntry.title, agency: manualEntry.agency, status: manualEntry.status,
                             date: manualEntry.date, link: manualEntry.link, assignedTo: manualEntry.assignedTo,
@@ -1372,7 +1396,6 @@
                             latestActivityDate: manualEntry.deadline || manualEntry.date || null }
                         : item
                     ));
-                    await logActivity('manual_entry_updated', editingManualEntry, manualEntry.title);
                     setShowManualEntry(false);
                     setEditingManualEntry(null);
                     setManualEntry(blankManual);
@@ -1382,13 +1405,18 @@
             const deleteManualEntry = async (itemId) => {
                 if (!confirm('Are you sure you want to delete this entry? This cannot be undone.')) return;
                 try {
-                    const { error } = await supabase.from('tracked_items').delete().eq('id', itemId);
-                    if (error) throw error;
+                    const response = await fetch('/api/app-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ action: 'trackedItem.manual.delete', itemId })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Failed to delete manual entry');
                     setItems(items.filter(item => item.id !== itemId));
                     const newSelected = new Set(selectedItems);
                     newSelected.delete(itemId);
                     setSelectedItems(newSelected);
-                    await logActivity('manual_entry_deleted', itemId, null);
                 } catch (err) { setError('Failed to delete manual entry: ' + err.message); }
             };
 

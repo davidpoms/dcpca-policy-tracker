@@ -715,7 +715,10 @@ test('config-table RLS keeps anon reads and removes anon writes', () => {
     'trackedItem.summary.delete',
     'trackedItem.activity.markSeen',
     'trackedItem.track',
-    'trackedItem.untrack'
+    'trackedItem.untrack',
+    'trackedItem.manual.create',
+    'trackedItem.manual.update',
+    'trackedItem.manual.delete'
   ];
   const actionBlock = appData.match(/const ALLOWED_ACTIONS = new Set\(\[([\s\S]*?)\]\);/);
 
@@ -1124,8 +1127,7 @@ test('only the five metadata functions moved behind app-data', () => {
   assert.match(appText, /const updateActionStatus = async/);
   assert.match(appText, /const checkHearingsForTrackedItems = async/);
   assert.match(appText, /const addManualEntry = async/);
-  assert.match(appText, /supabase\.from\('tracked_items'\)\.insert/);
-  assert.match(appText, /supabase\.from\('tracked_items'\)\.delete/);
+  assert.match(appText, /supabase\.from\('tracked_items'\)\.update/);
 });
 
 test('api/app-data.js implements the tracked-item track/untrack contracts', async () => {
@@ -1287,9 +1289,106 @@ test('toggleSelection uses app-data while remaining tracked-item writers stay di
   assert.match(appText, /const addManualEntry = async/);
   assert.match(appText, /const updateActionStatus = async/);
   assert.match(appText, /const checkHearingsForTrackedItems = async/);
-  assert.match(appText, /supabase\.from\('tracked_items'\)\.insert/);
   assert.match(appText, /supabase\.from\('tracked_items'\)\.update/);
-  assert.match(appText, /supabase\.from\('tracked_items'\)\.delete/);
+});
+
+test('manual-entry functions use app-data while action-status and hearing writers remain direct', () => {
+  const appText = readRepoText('index.html');
+  for (const [name, action] of [
+    ['addManualEntry', 'create'], ['updateManualEntry', 'update'], ['deleteManualEntry', 'delete']
+  ]) {
+    const block = appText.match(new RegExp(`const ${name} = async \\([^)]*\\) => \\{([\\s\\S]*?)\\n            \\};`));
+    assert.ok(block, name);
+    assert.doesNotMatch(block[1], /supabase\.from\('tracked_items'\)/);
+    assert.match(block[1], new RegExp(`action: 'trackedItem\\.manual\\.${action}'`));
+    if (name === 'deleteManualEntry') assert.match(block[1], /confirm\('Are you sure you want to delete this entry\? This cannot be undone\.'\)/);
+  }
+  assert.match(appText, /const updateActionStatus = async[\s\S]*?supabase\.from\('tracked_items'\)\.update/);
+  assert.match(appText, /const checkHearingsForTrackedItems = async[\s\S]*?supabase\.from\('tracked_items'\)\.update/);
+});
+
+test('manual-entry API preserves payloads, audit behavior, auth and generic failures', async () => {
+  const handler = await importFresh('api/app-data.js');
+  const { createSignedSession } = await importFreshModule('lib/session.js');
+  const originalFetch = global.fetch;
+  const calls = [];
+  let failure = null;
+  global.fetch = async (url, init = {}) => {
+    calls.push({ url, method: init.method, headers: init.headers, body: init.body ? JSON.parse(init.body) : undefined });
+    return { ok: !(failure === 'primary' && url.includes('/tracked_items') || failure === 'audit' && url.includes('/activity_log')), status: 500 };
+  };
+  let cookie;
+  const invoke = async (body, headers = { cookie }) => {
+    const res = makeRes();
+    await handler({ method: 'POST', headers, body: JSON.stringify(body) }, res);
+    return res;
+  };
+  const create = {
+    action: 'trackedItem.manual.create', itemId: 'MANUAL-123', title: '  Manual title  ',
+    agency: 'DC Government', status: 'Published', date: '2026-09-21', link: '',
+    assignedTo: 'Unassigned', priority: 'medium', actionStatus: 'action_needed',
+    noticeId: '', registerIssue: '', registerNotes: '', deadline: null,
+    isNew: true, latestActivityDate: '2026-09-21'
+  };
+  const update = {
+    action: 'trackedItem.manual.update', itemId: 'MANUAL/123', title: 'Changed',
+    agency: '', status: 'Open', date: '2026-09-22', link: '', assignedTo: 'A',
+    priority: 'high', actionStatus: 'in_progress', noticeId: '', registerIssue: '',
+    registerNotes: '', deadline: null
+  };
+  const del = { action: 'trackedItem.manual.delete', itemId: 'MANUAL/123' };
+  try {
+    await withEnv({ SESSION_SECRET: 'manual-secret', SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_KEY: 'service-key' }, async () => {
+      cookie = `dc_tracker_session=${encodeURIComponent(createSignedSession(Date.now() + 60000))}`;
+      for (const [body, method, row, audit] of [
+        [create, 'POST', {
+          id: 'MANUAL-123', title: '  Manual title  ', bill_number: null,
+          category: 'Municipal Regulation', status: 'Published', committees: [],
+          date: '2026-09-21', description: '  Manual title  ', link: '',
+          source: 'Municipal Register', agency: 'DC Government', is_manual_entry: true,
+          is_new: true, assigned_to: 'Unassigned', priority: 'medium',
+          action_status: 'action_needed', introduced_by: null, notice_id: '',
+          register_issue: '', register_notes: '', deadline: null,
+          latest_activity_date: '2026-09-21'
+        }, { action: 'manual_entry_added', item_id: 'MANUAL-123', item_title: '  Manual title  ', details: { source: 'Municipal Register' } }],
+        [update, 'PATCH', {
+          title: 'Changed', agency: '', status: 'Open', date: '2026-09-22', link: '',
+          assigned_to: 'A', priority: 'high', action_status: 'in_progress',
+          notice_id: '', register_issue: '', register_notes: '', description: 'Changed',
+          deadline: null, latest_activity_date: '2026-09-22'
+        }, { action: 'manual_entry_updated', item_id: 'MANUAL/123', item_title: 'Changed', details: {} }],
+        [del, 'DELETE', undefined, { action: 'manual_entry_deleted', item_id: 'MANUAL/123', item_title: null, details: {} }]
+      ]) {
+        calls.length = 0;
+        assert.equal((await invoke(body)).statusCode, 200);
+        assert.equal(calls[0].method, method);
+        assert.equal(calls[0].url, `https://example.supabase.co/rest/v1/tracked_items${method === 'POST' ? '' : '?id=eq.MANUAL%2F123'}`);
+        assert.deepEqual(calls[0].body, row);
+        assert.equal(calls[0].headers.Authorization, 'Bearer service-key');
+        assert.deepEqual(calls[1].body, audit);
+        assert.equal(calls.some(c => c.url.includes('bill_status_history')), false);
+        failure = 'audit';
+        assert.equal((await invoke(body)).statusCode, 200);
+        failure = null;
+      }
+      for (const body of [
+        { ...create, extra: true }, { ...create, itemId: '' }, { ...create, isNew: 'true' },
+        { ...create, deadline: 4 }, { ...create, latestActivityDate: 4 },
+        Object.fromEntries(Object.entries(create).filter(([key]) => key !== 'noticeId')),
+        { ...update, itemId: 3 }, { ...update, title: 3 }, { ...update, extra: true },
+        Object.fromEntries(Object.entries(update).filter(([key]) => key !== 'deadline')),
+        { ...del, itemId: '' }, { ...del, extra: true }
+      ]) assert.equal((await invoke(body)).statusCode, 400);
+      for (const body of [create, update, del]) {
+        assert.equal((await invoke(body, {})).statusCode, 401);
+        failure = 'primary';
+        const res = await invoke(body);
+        assert.equal(res.statusCode, 500);
+        assert.deepEqual(res.body, { error: 'Service unavailable' });
+        failure = null;
+      }
+    });
+  } finally { global.fetch = originalFetch; }
 });
 
 test('api/app-data.js accepts and validates note.save and note.delete payloads', async () => {
