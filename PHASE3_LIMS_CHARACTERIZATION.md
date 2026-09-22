@@ -6,6 +6,8 @@ The browser tests evaluate date-dependent `isNewItem` source from `index.html`, 
 
 Phase 3 API client Stage 1 adds `frontend/api-client.js` after the three LIMS scripts and before Babel. Its `window.DCPCAFrontend.appDataRequest(payload)` performs only the existing `/api/app-data` JSON POST and returns the raw response. Every caller in `index.html` retains its own response parsing, failure handling, and React state timing, including action-status partial success and best-effort hearing/activity calls.
 
+API client Stage 2 also places the existing `/api/hello` `proxyFetch` implementation in `frontend/api-client.js`. It still sends the outer JSON POST without an explicit credentials option, parses every response as JSON, and logs and rethrows `data.error` or request/parsing failures. Council-period, search, and hearing callers keep their separate UI errors, per-keyword continuation, and hearing error handling in `index.html`.
+
 Fixtures that protect intentional differences:
 
 | Fixture | Browser behavior | Cron behavior |

@@ -35,6 +35,81 @@ test('app-data transport sends the exact JSON POST and returns the raw response'
   });
 });
 
+test('LIMS proxy preserves its POST envelope, defaults, and JSON response handling', async () => {
+  const calls = [];
+  const values = [{ rows: [1] }, { result: true }];
+  const context = {
+    window: {},
+    fetch: (url, options) => {
+      calls.push({ url, options });
+      return Promise.resolve({ ok: false, json: async () => values.shift() });
+    },
+    console: { error() { throw new Error('unexpected log'); } }
+  };
+  vm.runInNewContext(read('frontend/api-client.js'), context);
+  assert.deepEqual(JSON.parse(JSON.stringify(await context.window.DCPCAFrontend.proxyFetch('/CouncilPeriods'))), { rows: [1] });
+  assert.deepEqual(JSON.parse(JSON.stringify(await context.window.DCPCAFrontend.proxyFetch('/SearchLegislation', 'POST', { Keyword: 'housing' }))), { result: true });
+  assert.deepEqual(calls.map(({ url, options }) => ({ url, options: JSON.parse(JSON.stringify(options)) })), [
+    { url: '/api/hello', options: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: '/CouncilPeriods', method: 'GET', body: null }) } },
+    { url: '/api/hello', options: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: '/SearchLegislation', method: 'POST', body: { Keyword: 'housing' } }) } }
+  ]);
+  assert.equal(Object.hasOwn(calls[0].options, 'credentials'), false);
+});
+
+test('LIMS proxy logs and rethrows data.error, JSON errors, and fetch errors', async () => {
+  const logs = [];
+  let outcome = { json: async () => ({ error: 'LIMS failed' }) };
+  const context = {
+    window: {},
+    fetch: async () => {
+      if (outcome instanceof Error) throw outcome;
+      return outcome;
+    },
+    console: { error: (...args) => logs.push(args) }
+  };
+  vm.runInNewContext(read('frontend/api-client.js'), context);
+  await assert.rejects(context.window.DCPCAFrontend.proxyFetch('/CouncilPeriods'), /LIMS failed/);
+  assert.equal(logs[0][0], 'Proxy fetch error:');
+  assert.equal(logs[0][1].message, 'LIMS failed');
+
+  const parseError = new Error('invalid JSON');
+  outcome = { json: async () => { throw parseError; } };
+  await assert.rejects(context.window.DCPCAFrontend.proxyFetch('/CouncilPeriods'), error => error === parseError);
+  assert.equal(logs[1][1], parseError);
+
+  const fetchError = new Error('offline');
+  outcome = fetchError;
+  await assert.rejects(context.window.DCPCAFrontend.proxyFetch('/CouncilPeriods'), error => error === fetchError);
+  assert.equal(logs[2][1], fetchError);
+});
+
+test('all LIMS proxy callers retain their own failure and continuation behavior', () => {
+  assert.doesNotMatch(html, /fetch\(['"]\/api\/hello['"]|fetch\(PROXY_URL|const proxyFetch\s*=|const PROXY_URL\s*=/);
+  assert.equal((html.match(/window\.DCPCAFrontend\.proxyFetch\(/g) || []).length, 4);
+
+  const councilPeriods = functionBody('loadCouncilPeriods');
+  assert.match(councilPeriods, /window\.DCPCAFrontend\.proxyFetch\('\/CouncilPeriods'\)/);
+  assert.match(councilPeriods, /setCouncilPeriods\(data\)/);
+  assert.match(councilPeriods, /setError\('Failed to load council periods: ' \+ err\.message\)/);
+
+  const details = functionBody('fetchLegislationDetails');
+  assert.match(details, /return await window\.DCPCAFrontend\.proxyFetch\(`\/LegislationDetails\/\$\{legislationNumber\}`, 'GET'\)/);
+  assert.doesNotMatch(details, /catch\s*\(/);
+  assert.match(functionBody('checkHearingsForTrackedItems'), /const details = await fetchLegislationDetails\(id\)/);
+  assert.match(functionBody('checkHearingForItem'), /const details = await fetchLegislationDetails\(itemId\)/);
+
+  const refresh = functionBody('refreshData');
+  assert.match(refresh, /for \(const keyword of trackedKeywords\)/);
+  assert.match(refresh, /window\.DCPCAFrontend\.proxyFetch\('\/SearchLegislation', 'POST'/);
+  assert.match(refresh, /catch \(err\) \{ console\.error\(`Error searching for "\$\{keyword\}":`, err\); allResults\.push\(\[\]\); \}/);
+  assert.match(refresh, /await delay\(1000\)/);
+
+  const quick = functionBody('quickSearchByCategory');
+  assert.match(quick, /window\.DCPCAFrontend\.proxyFetch\('\/SearchLegislation', 'POST'/);
+  assert.match(quick, /setError\('Failed to search: ' \+ err\.message\)/);
+  assert.match(html, /<script src="frontend\/api-client\.js"><\/script>\s*<script type="text\/babel">/);
+});
+
 test('all app-data callers use the transport and the classic script loads before Babel', () => {
   assert.match(html, /<script src="frontend\/lims-hearings\.js"><\/script>\s*<script src="frontend\/api-client\.js"><\/script>\s*<script type="text\/babel">/);
   assert.doesNotMatch(html, /fetch\(['"]\/api\/app-data['"]/);

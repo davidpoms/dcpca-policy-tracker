@@ -195,8 +195,6 @@
             const [statusHistory, setStatusHistory] = useState({}); // item_id -> [{old_status, new_status, changed_at, change_label}]
             const [expandedHistory, setExpandedHistory] = useState(new Set());
 
-            const PROXY_URL = '/api/hello';
-
             useEffect(() => {
                 loadFromSupabase();
                 loadCouncilPeriods();
@@ -321,26 +319,10 @@
                 } catch (err) { console.error('Error loading activity log:', err); }
             };
 
-            const proxyFetch = async (endpoint, method = 'GET', body = null) => {
-                try {
-                    const response = await fetch(PROXY_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ endpoint, method, body })
-                    });
-                    const data = await response.json();
-                    if (data.error) throw new Error(data.error);
-                    return data;
-                } catch (error) {
-                    console.error('Proxy fetch error:', error);
-                    throw error;
-                }
-            };
-
             const loadCouncilPeriods = async () => {
                 try {
                     setLoading(true);
-                    const data = await proxyFetch('/CouncilPeriods');
+                    const data = await window.DCPCAFrontend.proxyFetch('/CouncilPeriods');
                     setCouncilPeriods(data);
                     if (data.length > 0) setSelectedPeriod(data[0]);
                     setLoading(false);
@@ -353,7 +335,7 @@
             // ── Hearing functions ─────────────────────────────────────────────────────
 
             const fetchLegislationDetails = async (legislationNumber) => {
-                return await proxyFetch(`/LegislationDetails/${legislationNumber}`, 'GET');
+                return await window.DCPCAFrontend.proxyFetch(`/LegislationDetails/${legislationNumber}`, 'GET');
             };
 
             const checkHearingsForTrackedItems = async () => {
@@ -515,7 +497,7 @@
                     if ((searchMode === 'all' || searchMode === 'keywords') && trackedKeywords.length > 0) {
                         for (const keyword of trackedKeywords) {
                             try {
-                                const result = await proxyFetch('/SearchLegislation', 'POST', {
+                                const result = await window.DCPCAFrontend.proxyFetch('/SearchLegislation', 'POST', {
                                     Keyword: keyword, CategoryId: 0,
                                     CouncilPeriodId: selectedPeriod.councilPeriodId, RowLimit: 20, OffSet: 0
                                 });
@@ -654,7 +636,7 @@
                     setSearchMode('keywords');
                 }
                 try {
-                    const results = await proxyFetch('/SearchLegislation', 'POST', {
+                    const results = await window.DCPCAFrontend.proxyFetch('/SearchLegislation', 'POST', {
                         Keyword: '', CategoryId: 0,
                         CouncilPeriodId: selectedPeriod.councilPeriodId, RowLimit: 100, OffSet: offset
                     });
