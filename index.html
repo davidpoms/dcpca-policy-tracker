@@ -248,6 +248,26 @@
                 .filter(Boolean);
         };
 
+        const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || null);
+
+        const transformLimsSearchItem = (leg, isNewItem) => {
+            const committees = normalizeCommittees(leg.referredToCommittees);
+            const introducedBy = parseMembers(leg.introducers) || leg.introducedBy || leg.primarySponsor || leg.sponsor || null;
+            const coIntroducers = parseMembers(leg.coIntroducers) || null;
+            return {
+                id: leg.legislationNumber, title: leg.title, billNumber: leg.legislationNumber,
+                category: leg.category || leg.subCategory || 'Uncategorized',
+                status: leg.status || 'Unknown', committees,
+                date: leg.introductionDate ? new Date(leg.introductionDate).toISOString().split('T')[0] : '',
+                description: leg.shortDescription || leg.title,
+                link: `https://lims.dccouncil.gov/Legislation/${leg.legislationNumber}`,
+                source: 'DC Council', isNew: isNewItem(leg.introductionDate),
+                assignedTo: null, priority: null, actionStatus: 'action_needed', introducedBy, coIntroducers
+            };
+        };
+        // The Stage 1 fixture harness evaluates the search map with normalizeCommittees as its dependency.
+        normalizeCommittees.transformLimsSearchItem = transformLimsSearchItem;
+
         function App() {
             const [authenticated, setAuthenticated] = useState(false);
             const [passwordInput, setPasswordInput] = useState('');
@@ -605,7 +625,6 @@
                             const latestActivityDate = latestActivity?.dateIso || currentItem?.latestActivityDate || null;
                             const latestActivityLabel = latestActivity?.label || currentItem?.latestActivityLabel || null;
                             const activityTimeline = extractActivityTimeline(details);
-                            const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || null);
                             const introducedBy = parseMembers(details.introducers) || currentItem?.introducedBy || null;
                             const coIntroducers = parseMembers(details.coIntroducers) || null;
 
@@ -684,7 +703,6 @@
                     const latestActivityLabel = latestActivity?.label || currentItem?.latestActivityLabel || null;
 
                     const activityTimeline = extractActivityTimeline(details);
-                    const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || null);
                     const introducedBy = parseMembers(details.introducers) || currentItem?.introducedBy || null;
                     const coIntroducers = parseMembers(details.coIntroducers) || null;
 
@@ -837,20 +855,7 @@
                     });
 
                     const transformedItems = allLegislation.map(leg => {
-                        const committees = normalizeCommittees(leg.referredToCommittees);
-                        const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || null);
-                        const introducedBy = parseMembers(leg.introducers) || leg.introducedBy || leg.primarySponsor || leg.sponsor || null;
-                        const coIntroducers = parseMembers(leg.coIntroducers) || null;
-                        return {
-                            id: leg.legislationNumber, title: leg.title, billNumber: leg.legislationNumber,
-                            category: leg.category || leg.subCategory || 'Uncategorized',
-                            status: leg.status || 'Unknown', committees,
-                            date: leg.introductionDate ? new Date(leg.introductionDate).toISOString().split('T')[0] : '',
-                            description: leg.shortDescription || leg.title,
-                            link: `https://lims.dccouncil.gov/Legislation/${leg.legislationNumber}`,
-                            source: 'DC Council', isNew: isNewItem(leg.introductionDate),
-                            assignedTo: null, priority: null, actionStatus: 'action_needed', introducedBy, coIntroducers
-                        };
+                        return normalizeCommittees.transformLimsSearchItem(leg, isNewItem);
                     });
 
                     const existingTrackedItems = items.filter(item =>
@@ -914,20 +919,7 @@
                         }
                     });
                     const transformedItems = allLegislation.map(leg => {
-                        const committees = normalizeCommittees(leg.referredToCommittees);
-                        const parseMembers = (val) => Array.isArray(val) ? val.map(m => m.memberName || m).join(', ') : (val || null);
-                        const introducedBy = parseMembers(leg.introducers) || leg.introducedBy || leg.primarySponsor || leg.sponsor || null;
-                        const coIntroducers = parseMembers(leg.coIntroducers) || null;
-                        return {
-                            id: leg.legislationNumber, title: leg.title, billNumber: leg.legislationNumber,
-                            category: leg.category || leg.subCategory || 'Uncategorized',
-                            status: leg.status || 'Unknown', committees,
-                            date: leg.introductionDate ? new Date(leg.introductionDate).toISOString().split('T')[0] : '',
-                            description: leg.shortDescription || leg.title,
-                            link: `https://lims.dccouncil.gov/Legislation/${leg.legislationNumber}`,
-                            source: 'DC Council', isNew: isNewItem(leg.introductionDate),
-                            assignedTo: null, priority: null, actionStatus: 'action_needed', introducedBy, coIntroducers
-                        };
+                        return normalizeCommittees.transformLimsSearchItem(leg, isNewItem);
                     });
                     const filteredByCategory = categoryName !== 'all'
                         ? transformedItems.filter(item => item.category === categoryName)
