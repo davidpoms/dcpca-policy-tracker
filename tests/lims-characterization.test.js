@@ -19,16 +19,16 @@ class FixedDate extends Date {
 
 function browser() {
   const html = read('index.html');
-  const start = html.indexOf('function extractNextHearing(details)');
-  const end = html.indexOf('function App()', start);
   const isNewStart = html.indexOf('const isNewItem = (dateString) =>');
   const isNewEnd = html.indexOf('const quickSearchByCategory =', isNewStart);
-  assert.ok(start >= 0 && end > start && isNewStart >= 0 && isNewEnd > isNewStart);
+  assert.ok(isNewStart >= 0 && isNewEnd > isNewStart);
   const context = { Date: FixedDate, window: {} };
   vm.runInNewContext(read('frontend/lims-normalization.js'), context);
   vm.runInNewContext(read('frontend/lims-activity.js'), context);
-  vm.runInNewContext(`${html.slice(start, end)}\n${html.slice(isNewStart, isNewEnd)}\n` +
-    'globalThis.parsers = { extractNextHearing, isNewItem, frontend: window.DCPCAFrontend };', context);
+  vm.runInNewContext(read('frontend/lims-hearings.js'), context);
+  vm.runInNewContext(`${html.slice(isNewStart, isNewEnd)}\n` +
+    'globalThis.parsers = { isNewItem, frontend: window.DCPCAFrontend };', context);
+  context.parsers.extractNextHearing = context.window.DCPCAFrontend.extractNextHearing;
   context.parsers.extractLatestActivityDate = context.window.DCPCAFrontend.extractLatestActivityDate;
   context.parsers.extractActivityTimeline = context.window.DCPCAFrontend.extractActivityTimeline;
   return { parsers: context.parsers, html };
@@ -56,18 +56,23 @@ function cronParsers() {
 
 function hearingDate(value) { return value?.date?.toISOString() || null; }
 
-test('browser activity helpers load before Babel and hearing checks use the extracted namespace', () => {
+test('browser LIMS helpers load before Babel and hearing checks use the extracted namespace', () => {
   const html = read('index.html');
   const activity = read('frontend/lims-activity.js');
-  assert.match(html, /<script src="frontend\/lims-normalization\.js"><\/script>\s*<script src="frontend\/lims-activity\.js"><\/script>\s*<script type="text\/babel">/);
+  const hearings = read('frontend/lims-hearings.js');
+  assert.match(html, /<script src="frontend\/lims-normalization\.js"><\/script>\s*<script src="frontend\/lims-activity\.js"><\/script>\s*<script src="frontend\/lims-hearings\.js"><\/script>\s*<script type="text\/babel">/);
   for (const name of ['extractLatestActivityDate', 'extractActivityTimeline']) {
     assert.match(activity, new RegExp(`function ${name}\\(details\\)`));
     assert.match(activity, new RegExp(`window\\.DCPCAFrontend\\.${name} = ${name};`));
     assert.doesNotMatch(html, new RegExp(`function ${name}\\(details\\)`));
   }
+  assert.match(hearings, /function extractNextHearing\(details\)/);
+  assert.match(hearings, /window\.DCPCAFrontend\.extractNextHearing = extractNextHearing;/);
+  assert.doesNotMatch(html, /function extractNextHearing\(details\)/);
   for (const name of ['checkHearingsForTrackedItems', 'checkHearingForItem']) {
     const block = html.match(new RegExp(`const ${name} = async \\([^)]*\\) => \\{([\\s\\S]*?)\\n            \\};`));
     assert.ok(block, name);
+    assert.match(block[1], /window\.DCPCAFrontend\.extractNextHearing\(details\)/);
     assert.match(block[1], /window\.DCPCAFrontend\.extractLatestActivityDate\(details\)/);
     assert.match(block[1], /window\.DCPCAFrontend\.extractActivityTimeline\(details\)/);
   }

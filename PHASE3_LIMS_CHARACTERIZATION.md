@@ -2,7 +2,7 @@
 
 `tests/fixtures/lims-characterization.json` and `tests/lims-characterization.test.js` freeze the existing browser and cron behavior independently. They are characterization tests, not a shared parsing contract.
 
-The browser tests evaluate the hearing parser and date-dependent `isNewItem` source from `index.html`, normalization from `frontend/lims-normalization.js`, and latest-activity and timeline logic from `frontend/lims-activity.js` inside a small VM. Both same-origin classic scripts load before the inline Babel entry and expose helpers through `window.DCPCAFrontend`. The cron tests evaluate the existing `api/check-hearings.js` source with mocked fetch and mail. API contracts are unchanged. The test clock is 2026-09-21 12:00 UTC; the test worker uses UTC for formatted dates. The cron delay is skipped only in the test harness.
+The browser tests evaluate date-dependent `isNewItem` source from `index.html`, normalization from `frontend/lims-normalization.js`, latest-activity and timeline logic from `frontend/lims-activity.js`, and browser hearing selection from `frontend/lims-hearings.js` inside a small VM. All three same-origin classic scripts load before the inline Babel entry and expose helpers through `window.DCPCAFrontend`. The cron tests evaluate the separate `api/check-hearings.js` source with mocked fetch and mail. API contracts are unchanged. The test clock is 2026-09-21 12:00 UTC; the test worker uses UTC for formatted dates. The cron delay is skipped only in the test harness.
 
 Fixtures that protect intentional differences:
 
