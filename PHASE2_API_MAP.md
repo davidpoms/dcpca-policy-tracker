@@ -162,6 +162,32 @@ Remaining mutation families:
 
 The direct `activity_log` browser helper remains for unmigrated flows. Assignment and priority audit writes for this slice now occur server-side; summary and mark-seen actions produce no activity event.
 
+### tracked-item track/untrack lifecycle slice
+
+Status: IMPLEMENTED in `/api/app-data.js`.
+
+#### trackedItem.track
+
+- Exact request keys: `action`, `itemId`, `title`, `billNumber`, `category`, `status`, `committees`, `date`, `description`, `link`, `source`, `agency`, `isManualEntry`, `isNew`, `introducedBy`
+- Validation: `itemId` must be a non-empty string; `title` and `source` must be strings. Other fields preserve the existing legislation and Municipal Register source shapes, including nullable values and committee arrays.
+- Server write: `POST tracked_items` with the explicit source fields mapped to database columns.
+- Server-supplied defaults: `assigned_to = 'Unassigned'`, `priority = 'medium'`, `action_status = 'action_needed'`, `has_new_activity = false`, and a request-time ISO `last_checked_at`.
+- No upsert and no arbitrary field map.
+- Server-side best-effort audit: `item_tracked`, with `item_id`, `item_title`, and `{ source, category }`.
+- No `bill_status_history` write.
+- Response: `{ ok: true }`.
+
+#### trackedItem.untrack
+
+- Exact request keys: `action`, `itemId`, `itemTitle`
+- Validation: non-empty string `itemId` and string `itemTitle`.
+- Server write: `DELETE tracked_items` filtered by exact `id`.
+- Server-side best-effort audit: `item_untracked`, with empty details.
+- No `bill_status_history` write.
+- Response: `{ ok: true }`.
+
+The browser updates selection and tracked-item defaults only after the API succeeds. Direct browser writes for manual-entry lifecycle, action-status/history, and hearing/activity enrichment remain, so `tracked_items` write RLS and `activity_log` write RLS must remain unchanged for now. The remaining browser mutation families are manual-entry lifecycle, action-status/history, and hearing/activity enrichment.
+
 ### item_notes RLS inventory and rollout
 
 Preview inventory:

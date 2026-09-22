@@ -713,7 +713,9 @@ test('config-table RLS keeps anon reads and removes anon writes', () => {
     'trackedItem.priority.update',
     'trackedItem.summary.save',
     'trackedItem.summary.delete',
-    'trackedItem.activity.markSeen'
+    'trackedItem.activity.markSeen',
+    'trackedItem.track',
+    'trackedItem.untrack'
   ];
   const actionBlock = appData.match(/const ALLOWED_ACTIONS = new Set\(\[([\s\S]*?)\]\);/);
 
@@ -1123,6 +1125,170 @@ test('only the five metadata functions moved behind app-data', () => {
   assert.match(appText, /const checkHearingsForTrackedItems = async/);
   assert.match(appText, /const addManualEntry = async/);
   assert.match(appText, /supabase\.from\('tracked_items'\)\.insert/);
+  assert.match(appText, /supabase\.from\('tracked_items'\)\.delete/);
+});
+
+test('api/app-data.js implements the tracked-item track/untrack contracts', async () => {
+  const handler = await importFresh('api/app-data.js');
+  const libSession = await importFreshModule('lib/session.js');
+  const { createSignedSession } = libSession;
+  const originalFetch = global.fetch;
+  const calls = [];
+  let failureMode = null;
+
+  global.fetch = async (url, init = {}) => {
+    const call = {
+      url,
+      method: init.method || 'GET',
+      body: init.body ? JSON.parse(init.body) : undefined
+    };
+    calls.push(call);
+    if (failureMode === 'tracked' && url.includes('/tracked_items')) return { ok: false, status: 500 };
+    if (url.endsWith('/activity_log') && failureMode === 'activity') return { ok: false, status: 500 };
+    if (url.endsWith('/activity_log')) return { ok: true, status: 200 };
+    return { ok: true, status: 200 };
+  };
+
+  let cookie;
+  const invoke = async (body, headers = { cookie }) => {
+    const response = makeRes();
+    await handler({ method: 'POST', headers, body: JSON.stringify(body) }, response);
+    return response;
+  };
+
+  try {
+    await withEnv({
+      SESSION_SECRET: 'app-data-secret',
+      SUPABASE_URL: 'https://example.supabase.co',
+      SUPABASE_SERVICE_KEY: 'service-key'
+    }, async () => {
+      cookie = `dc_tracker_session=${encodeURIComponent(createSignedSession(Date.now() + 60 * 1000))}`;
+
+      const legislation = {
+        action: 'trackedItem.track',
+        itemId: 'B26-0001',
+        title: '  A bill  ',
+        billNumber: 'B26-0001',
+        category: 'Bill',
+        status: 'Introduced',
+        committees: ['Committee A'],
+        date: '2026-01-01',
+        description: 'Description',
+        link: 'https://example.test/bill',
+        source: 'DC Council',
+        agency: null,
+        isManualEntry: false,
+        isNew: true,
+        introducedBy: null
+      };
+      let response = await invoke(legislation);
+      assert.equal(response.statusCode, 200);
+      assert.equal(calls[0].url, 'https://example.supabase.co/rest/v1/tracked_items');
+      assert.equal(calls[0].method, 'POST');
+      assert.deepEqual({ ...calls[0].body, last_checked_at: undefined }, {
+        id: 'B26-0001', title: '  A bill  ', bill_number: 'B26-0001', category: 'Bill',
+        status: 'Introduced', committees: ['Committee A'], date: '2026-01-01',
+        description: 'Description', link: 'https://example.test/bill', source: 'DC Council',
+        agency: null, is_manual_entry: false, is_new: true, assigned_to: 'Unassigned',
+        priority: 'medium', action_status: 'action_needed', introduced_by: null,
+        last_status: 'Introduced', last_checked_at: undefined, has_new_activity: false
+      });
+      assert.match(calls[0].body.last_checked_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+      assert.deepEqual(calls[1].body, {
+        action: 'item_tracked', item_id: 'B26-0001', item_title: '  A bill  ',
+        details: { source: 'DC Council', category: 'Bill' }
+      });
+      assert.equal(calls.some((call) => call.url.includes('/bill_status_history')), false);
+
+      calls.length = 0;
+      failureMode = 'activity';
+      response = await invoke({
+        ...legislation,
+        itemId: 'MANUAL-1',
+        title: 'Manual item',
+        billNumber: null,
+        category: 'Municipal Regulation',
+        status: 'Published',
+        committees: [],
+        date: '2026-02-01',
+        description: 'Manual item',
+        link: '',
+        source: 'Municipal Register',
+        agency: 'DC Government',
+        isManualEntry: true,
+        isNew: false,
+        introducedBy: null
+      });
+      assert.equal(response.statusCode, 200);
+      assert.equal(calls.length, 2);
+      failureMode = null;
+
+      calls.length = 0;
+      response = await invoke({ action: 'trackedItem.untrack', itemId: 'B26/0001', itemTitle: 'A bill' });
+      assert.equal(response.statusCode, 200);
+      assert.deepEqual(calls[0], {
+        url: 'https://example.supabase.co/rest/v1/tracked_items?id=eq.B26%2F0001',
+        method: 'DELETE', body: undefined
+      });
+      assert.deepEqual(calls[1].body, {
+        action: 'item_untracked', item_id: 'B26/0001', item_title: 'A bill', details: {}
+      });
+      assert.equal(calls.some((call) => call.url.includes('/bill_status_history')), false);
+
+      calls.length = 0;
+      failureMode = 'activity';
+      response = await invoke({ action: 'trackedItem.untrack', itemId: 'B26-0001', itemTitle: 'A bill' });
+      assert.equal(response.statusCode, 200);
+      failureMode = null;
+
+      for (const body of [
+        { ...legislation, extra: true },
+        { ...legislation, itemId: '' },
+        { ...legislation, itemId: 42 },
+        { ...legislation, title: 42 },
+        { ...legislation, source: 42 },
+        { action: 'trackedItem.untrack', itemId: '', itemTitle: 'A bill' },
+        { action: 'trackedItem.untrack', itemId: 42, itemTitle: 'A bill' },
+        { action: 'trackedItem.untrack', itemId: 'B26-0001', itemTitle: 42 },
+        { action: 'trackedItem.untrack', itemId: 'B26-0001', itemTitle: 'A bill', extra: true }
+      ]) {
+        response = await invoke(body);
+        assert.equal(response.statusCode, 400);
+      }
+
+      failureMode = 'tracked';
+      response = await invoke(legislation);
+      assert.equal(response.statusCode, 500);
+      assert.equal(response.body.error, 'Service unavailable');
+      assert.doesNotMatch(JSON.stringify(response.body), /service-key|SUPABASE_SERVICE_KEY|Supabase/i);
+      response = await invoke({ action: 'trackedItem.untrack', itemId: 'B26-0001', itemTitle: 'A bill' });
+      assert.equal(response.statusCode, 500);
+      assert.equal(response.body.error, 'Service unavailable');
+
+      const unauthenticated = await invoke({ action: 'trackedItem.untrack', itemId: 'B26-0001', itemTitle: 'A bill' }, {});
+      assert.equal(unauthenticated.statusCode, 401);
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('toggleSelection uses app-data while remaining tracked-item writers stay direct', () => {
+  const appText = readRepoText('index.html');
+  const toggleBlock = appText.match(/const toggleSelection = async \(itemId\) => \{([\s\S]*?)\n            \};/);
+
+  assert.ok(toggleBlock);
+  assert.doesNotMatch(toggleBlock[1], /supabase\.from\('tracked_items'\)\s*\.\s*(?:insert|delete)/);
+  assert.match(toggleBlock[1], /action:\s*'trackedItem\.track'/);
+  assert.match(toggleBlock[1], /action:\s*'trackedItem\.untrack'/);
+  assert.match(toggleBlock[1], /setSelectedItems\(newSelected\)/);
+  assert.match(toggleBlock[1], /setItems\(items\.map/);
+
+  assert.match(appText, /const addManualEntry = async/);
+  assert.match(appText, /const updateActionStatus = async/);
+  assert.match(appText, /const checkHearingsForTrackedItems = async/);
+  assert.match(appText, /supabase\.from\('tracked_items'\)\.insert/);
+  assert.match(appText, /supabase\.from\('tracked_items'\)\.update/);
   assert.match(appText, /supabase\.from\('tracked_items'\)\.delete/);
 });
 

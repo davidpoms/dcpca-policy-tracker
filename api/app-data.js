@@ -18,7 +18,9 @@ const ALLOWED_ACTIONS = new Set([
   'trackedItem.priority.update',
   'trackedItem.summary.save',
   'trackedItem.summary.delete',
-  'trackedItem.activity.markSeen'
+  'trackedItem.activity.markSeen',
+  'trackedItem.track',
+  'trackedItem.untrack'
 ]);
 
 function isExactBody(body, allowedKeys) {
@@ -539,6 +541,78 @@ export default async function handler(req, res) {
           { has_new_activity: false, activity_summary: null },
           `?id=eq.${encodeURIComponent(body.itemId)}`
         );
+
+        return res.status(200).json({ ok: true });
+      }
+
+      case 'trackedItem.track': {
+        const trackKeys = [
+          'action', 'itemId', 'title', 'billNumber', 'category', 'status', 'committees',
+          'date', 'description', 'link', 'source', 'agency', 'isManualEntry', 'isNew',
+          'introducedBy'
+        ];
+        if (!isExactBody(body, trackKeys)) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        if (typeof body.itemId !== 'string' || body.itemId.trim() === '' ||
+            typeof body.title !== 'string' || typeof body.source !== 'string') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        await supabaseTableRequest(
+          supabaseUrl,
+          serviceKey,
+          'tracked_items',
+          'POST',
+          {
+            id: body.itemId,
+            title: body.title,
+            bill_number: body.billNumber,
+            category: body.category,
+            status: body.status,
+            committees: body.committees,
+            date: body.date,
+            description: body.description,
+            link: body.link,
+            source: body.source,
+            agency: body.agency,
+            is_manual_entry: body.isManualEntry,
+            is_new: body.isNew,
+            assigned_to: 'Unassigned',
+            priority: 'medium',
+            action_status: 'action_needed',
+            introduced_by: body.introducedBy,
+            last_status: body.status,
+            last_checked_at: new Date().toISOString(),
+            has_new_activity: false
+          }
+        );
+        await logActivityEvent(supabaseUrl, serviceKey, 'item_tracked', body.itemId, body.title, {
+          source: body.source,
+          category: body.category
+        });
+
+        return res.status(200).json({ ok: true });
+      }
+
+      case 'trackedItem.untrack': {
+        if (!isExactBody(body, ['action', 'itemId', 'itemTitle'])) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        if (typeof body.itemId !== 'string' || body.itemId.trim() === '' ||
+            typeof body.itemTitle !== 'string') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        await supabaseTableRequest(
+          supabaseUrl,
+          serviceKey,
+          'tracked_items',
+          'DELETE',
+          null,
+          `?id=eq.${encodeURIComponent(body.itemId)}`
+        );
+        await logActivityEvent(supabaseUrl, serviceKey, 'item_untracked', body.itemId, body.itemTitle, {});
 
         return res.status(200).json({ ok: true });
       }
