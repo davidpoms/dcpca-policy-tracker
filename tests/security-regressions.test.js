@@ -743,6 +743,26 @@ test('config-table RLS keeps anon reads and removes anon writes', () => {
   }
 });
 
+test('bill-status history RLS keeps anon SELECT and removes browser write policies', () => {
+  const canonical = readRepoText('rls-migration.sql');
+  const migration = readRepoText('migrations/2026-09-21-tighten-bill-status-history-rls.sql');
+  const writePolicy = /CREATE POLICY\s+"[^"]*"\s+ON bill_status_history\s+FOR (?:INSERT|UPDATE|DELETE)\b/i;
+  const readPolicy = /CREATE POLICY\s+"anon can read bill_status_history"\s+ON bill_status_history\s+FOR SELECT TO anon USING \(true\)/;
+  for (const sql of [canonical, migration]) {
+    assert.match(sql, /ALTER TABLE bill_status_history ENABLE ROW LEVEL SECURITY/);
+    assert.match(sql, /DROP POLICY IF EXISTS "anon can insert bill_status_history"\s+ON bill_status_history/);
+    assert.match(sql, readPolicy);
+    assert.doesNotMatch(sql, writePolicy);
+  }
+  assert.match(migration, /DROP POLICY IF EXISTS "anon can read bill_status_history"\s+ON bill_status_history/);
+
+  const appData = readRepoText('api/app-data.js');
+  const action = appData.match(/case 'trackedItem\.actionStatus\.update': \{([\s\S]*?)\n      \}/);
+  assert.ok(action);
+  assert.match(action[1], /supabaseTableRequest\(supabaseUrl, serviceKey, 'bill_status_history', 'POST'/);
+  assert.doesNotMatch(readRepoText('index.html'), /\.from\('bill_status_history'\)\s*\.\s*insert\s*\(/);
+});
+
 test('item_notes RLS migration keeps anon reads and removes anon/public writes', () => {
   const canonicalRls = readRepoText('rls-migration.sql');
   const versionedMigration = readRepoText('migrations/2026-09-18-tighten-item-notes-rls.sql');
