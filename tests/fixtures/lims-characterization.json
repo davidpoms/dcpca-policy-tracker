@@ -1,0 +1,82 @@
+{
+  "fixedNow": "2026-09-21T12:00:00.000Z",
+  "details": {
+    "hn26_0162": {
+      "legislationNumber": "HN26-0162",
+      "category": "Oversight Hearing/Roundtable Notice",
+      "introductionDate": "2027-01-15T12:00:00.000Z",
+      "committeeHearing": [],
+      "committeeMarkup": [],
+      "actions": null
+    },
+    "future_and_past": {
+      "committeeHearing": [
+        { "hearingDate": "2025-05-15T12:00:00.000Z", "hearingType": "Past Hearing" },
+        { "hearingDate": "2027-03-20T12:00:00.000Z", "hearingType": "Future Hearing", "location": "Room A" }
+      ],
+      "committeeMarkup": [], "actions": null
+    },
+    "past_only": {
+      "committeeHearing": [
+        { "hearingDate": "2025-03-01T12:00:00.000Z", "hearingType": "Older" },
+        { "hearingDate": "2025-06-01T12:00:00.000Z", "hearingType": "Latest Past" }
+      ],
+      "committeeMarkup": [], "actions": null
+    },
+    "markup_divergence": {
+      "committeeHearing": [],
+      "committeeMarkup": [{
+        "hearingDate": "2027-04-10T12:00:00.000Z",
+        "committeeActionDate": "2027-06-20T12:00:00.000Z",
+        "hearingType": "Markup Type", "location": "Room B"
+      }],
+      "actions": null
+    },
+    "flat_fallback": {
+      "committeeHearing": [], "committeeMarkup": [], "actions": null,
+      "nextHearingDate": "2027-05-11T12:00:00.000Z", "hearingLocation": "Room C"
+    },
+    "history_fallback": {
+      "committeeHearing": [], "committeeMarkup": [],
+      "actions": [{ "action": "Public Hearing", "actionDate": "2027-05-12T12:00:00.000Z", "location": "Room D" }]
+    },
+    "competing_ties": {
+      "introductionDate": "2025-01-01T12:00:00.000Z",
+      "actions": [{ "action": "Council Vote", "actionDate": "2028-01-01T12:00:00.000Z" }],
+      "congressionalReview": { "effectiveDate": "2028-01-01T12:00:00.000Z" },
+      "mayoralReview": { "signedDate": "2028-01-01T12:00:00.000Z" },
+      "committeeReReferral": [{ "reReferralDate": "2028-01-01T12:00:00.000Z", "committeeName": ["A", "B"] }],
+      "committeeHearing": [{ "hearingDate": "2028-01-01T12:00:00.000Z", "hearingType": "Hearing" }],
+      "committeeMarkup": [{ "committeeActionDate": "2028-01-01T12:00:00.000Z", "reportFiledDate": "2028-01-01T12:00:00.000Z" }]
+    },
+    "empty_invalid": {
+      "introductionDate": "not a date", "actions": null,
+      "committeeHearing": [{ "hearingDate": "invalid" }], "committeeMarkup": [],
+      "committeeReReferral": null
+    },
+    "malformed_actions": {
+      "actions": { "actionDate": "2027-01-01T12:00:00.000Z" },
+      "committeeHearing": [], "committeeMarkup": []
+    }
+  },
+  "cronScenarios": [
+    {
+      "name": "unchanged",
+      "stored": { "status": "Introduced", "title": "Bill", "next_hearing_date": null, "additional_information": "Saved", "committee_re_referral": [{ "committeeName": "Old" }] },
+      "details": { "status": "Introduced", "title": " Bill ", "additionalInformation": null, "committeeReReferral": [], "committeeHearing": [], "committeeMarkup": [], "actions": null },
+      "historyCount": 0, "emailCount": 0
+    },
+    {
+      "name": "status_title_new_hearing",
+      "stored": { "status": "Introduced", "title": "Bill", "next_hearing_date": null, "additional_information": "Saved", "committee_re_referral": [{ "committeeName": "Old" }] },
+      "details": { "status": "Passed", "title": "Bill (CANCELLED)", "additionalInformation": null, "committeeReReferral": [], "committeeHearing": [{ "hearingDate": "2027-03-20T12:00:00.000Z", "hearingType": "Public Hearing", "location": "Room A" }], "committeeMarkup": [], "actions": null },
+      "historyCount": 3, "emailCount": 2
+    },
+    {
+      "name": "same_calendar_day",
+      "stored": { "status": "Introduced", "title": "Bill", "next_hearing_date": "2027-03-20T09:00:00.000Z", "additional_information": "Saved", "committee_re_referral": [{ "committeeName": "Old" }] },
+      "details": { "status": "Introduced", "title": "Bill", "additionalInformation": null, "committeeReReferral": [], "committeeHearing": [{ "hearingDate": "2027-03-20T12:00:00.000Z", "hearingType": "Public Hearing" }], "committeeMarkup": [], "actions": null },
+      "historyCount": 0, "emailCount": 0
+    }
+  ]
+}
