@@ -46,8 +46,7 @@ DROP POLICY IF EXISTS "anon can read bill_status_history"   ON bill_status_histo
 DROP POLICY IF EXISTS "anon can insert bill_status_history" ON bill_status_history;
 
 CREATE POLICY "anon can read bill_status_history"   ON bill_status_history FOR SELECT TO anon USING (true);
-CREATE POLICY "anon can insert bill_status_history" ON bill_status_history FOR INSERT TO anon WITH CHECK (true);
--- No update or delete — history is immutable from the browser
+-- History writes use server-side service-role access only.
 
 -- ─── team_members ─────────────────────────────────────────────────────────────
 

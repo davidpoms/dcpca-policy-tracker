@@ -174,7 +174,25 @@ Status: IMPLEMENTED in `/api/app-data.js` as `trackedItem.actionStatus.update`.
 - Exact request: `{ action, itemId, itemTitle, oldStatus, newStatus }`; `itemId` is a non-empty string and the other values are strings. The existing label map converts `action_needed` to `Action Needed`, `monitor_and_assess` to `Monitor & Assess`, and `action_completed` to `Action Completed`; other strings retain their original value.
 - The server first PATCHes `tracked_items` with only `{ action_status: newStatus }`, filtered by exact item ID. It then POSTs `bill_status_history` with the item ID, old/new display labels, `Tracker status changed: OLD → NEW`, and request-time ISO `changed_at`. Only after history succeeds does it best-effort POST `action_status_changed` to `activity_log` with `{ from: oldStatus, to: newStatus }`.
 - A tracked-item PATCH failure stops before history and activity. A history failure stops before activity and returns `{ error: 'Service unavailable', trackedItemUpdated: true }` with HTTP 500. This marker lets the browser reflect the successful PATCH locally while retaining its error UI. Activity failure does not fail the request. The writes are not transactional.
-- The browser no longer writes either table or logs this action directly. Signed-session and service-role authorization follow the existing route. Hearing-related browser writes remain, so `tracked_items` and `bill_status_history` RLS are unchanged.
+- The browser no longer writes either table or logs this action directly. Signed-session and service-role authorization follow the existing route. Hearing-related browser writes remain, so `tracked_items` RLS is unchanged. The `bill_status_history` read-only browser policy is prepared below.
+
+#### bill_status_history RLS tightening
+
+Known live policy inventory in both Preview and Production:
+
+- `anon can read bill_status_history`: `FOR SELECT TO anon USING (true)`
+- `anon can insert bill_status_history`: `FOR INSERT TO anon WITH CHECK (true)`
+
+The browser no longer inserts history. `trackedItem.actionStatus.update` writes through `/api/app-data` with the service role; `check-hearings.js` also runs server-side with the service role. The canonical `rls-migration.sql` and `migrations/2026-09-21-tighten-bill-status-history-rls.sql` retain only the anon SELECT policy. This migration has not been applied.
+
+Rollout: deploy the action-status runtime first, apply the versioned migration in Preview, verify anon SELECT succeeds and anon INSERT is denied while authenticated action-status history writes still succeed, then repeat in Production after Preview passes. `tracked_items` and `activity_log` RLS remain unchanged.
+
+Rollback, only if the previous anonymous INSERT access must be restored:
+
+```sql
+CREATE POLICY "anon can insert bill_status_history"
+  ON bill_status_history FOR INSERT TO anon WITH CHECK (true);
+```
 
 The direct `activity_log` browser helper remains for unmigrated flows. Assignment and priority audit writes for this slice now occur server-side; summary and mark-seen actions produce no activity event.
 
