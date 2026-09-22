@@ -967,7 +967,7 @@ test('team member frontend mutations use app-data while reads and unrelated item
   assert.match(appText, /teamMemberId:\s*String\(editingTeamMember\)/);
   assert.match(appText, /teamMemberId:\s*String\(memberId\)/);
   assert.doesNotMatch(appText, /supabase\.from\('tracked_items'\)\.update\(\{ assigned_to: teamMemberForm\.name \}\)/);
-  assert.match(appText, /supabase\.from\('tracked_items'\)\.update\(\{ action_status: newStatus \}\)/);
+  assert.match(appText, /const checkHearingsForTrackedItems = async[\s\S]*?supabase\.from\('tracked_items'\)\.update\(\{\s*hearing_checked_at: now/);
 });
 
 test('api/app-data.js implements the five tracked-item metadata action contracts', async () => {
