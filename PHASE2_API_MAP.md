@@ -151,11 +151,10 @@ Status: IMPLEMENTED in `/api/app-data.js`. This slice moves only five simple met
 
 The browser still performs direct SELECTs. It now sends these five mutations through `/api/app-data` and updates local React state only after a successful API response. `summaryText || null` remains in the browser, so empty strings become `null` while whitespace-only strings remain strings.
 
-The canonical `tracked_items` and `activity_log` RLS policies have intentionally not changed. Action-status plus `bill_status_history` and hearing/activity enrichment remain browser writers. RLS cannot be tightened until those direct writers are migrated.
+The canonical `tracked_items` and `activity_log` RLS policies have intentionally not changed. Hearing/activity enrichment remains a browser writer. RLS cannot be tightened until those direct writers are migrated.
 
 Remaining mutation families:
 
-- action-status/history
 - hearing/activity enrichment
 
 ### Manual-entry lifecycle slice
@@ -166,7 +165,16 @@ Status: IMPLEMENTED in `/api/app-data.js`. All requests require the signed sessi
 - `trackedItem.manual.update`: `{ action, itemId, title, agency, status, date, link, assignedTo, priority, actionStatus, noticeId, registerIssue, registerNotes, deadline }`. The server PATCHes only the existing manual-entry field allowlist by exact item ID: title, agency, status, date, link, assignment, priority, action status, notice/register fields, description equal to title, deadline, and `latest_activity_date` equal to `deadline || date || null`. Audit: best-effort `manual_entry_updated` with empty details.
 - `trackedItem.manual.delete`: `{ action, itemId }`. The browser keeps the existing confirmation. The server physically DELETEs the `tracked_items` row by exact item ID. Audit: best-effort `manual_entry_deleted` with null title and empty details.
 
-Each action returns `{ ok: true }`. The browser changes local items, selection, and edit state only after API success. `tracked_items` and `activity_log` RLS are unchanged. Action-status and hearing enrichment still write from the browser, so `tracked_items` RLS cannot yet be tightened.
+Each action returns `{ ok: true }`. The browser changes local items, selection, and edit state only after API success. `tracked_items` and `activity_log` RLS are unchanged. Hearing enrichment still writes from the browser, so `tracked_items` RLS cannot yet be tightened.
+
+### Action-status slice
+
+Status: IMPLEMENTED in `/api/app-data.js` as `trackedItem.actionStatus.update`.
+
+- Exact request: `{ action, itemId, itemTitle, oldStatus, newStatus }`; `itemId` is a non-empty string and the other values are strings. The existing label map converts `action_needed` to `Action Needed`, `monitor_and_assess` to `Monitor & Assess`, and `action_completed` to `Action Completed`; other strings retain their original value.
+- The server first PATCHes `tracked_items` with only `{ action_status: newStatus }`, filtered by exact item ID. It then POSTs `bill_status_history` with the item ID, old/new display labels, `Tracker status changed: OLD → NEW`, and request-time ISO `changed_at`. Only after history succeeds does it best-effort POST `action_status_changed` to `activity_log` with `{ from: oldStatus, to: newStatus }`.
+- A tracked-item PATCH failure stops before history and activity. A history failure stops before activity and returns `{ error: 'Service unavailable', trackedItemUpdated: true }` with HTTP 500. This marker lets the browser reflect the successful PATCH locally while retaining its error UI. Activity failure does not fail the request. The writes are not transactional.
+- The browser no longer writes either table or logs this action directly. Signed-session and service-role authorization follow the existing route. Hearing-related browser writes remain, so `tracked_items` and `bill_status_history` RLS are unchanged.
 
 The direct `activity_log` browser helper remains for unmigrated flows. Assignment and priority audit writes for this slice now occur server-side; summary and mark-seen actions produce no activity event.
 
@@ -194,7 +202,7 @@ Status: IMPLEMENTED in `/api/app-data.js`.
 - No `bill_status_history` write.
 - Response: `{ ok: true }`.
 
-The browser updates selection and tracked-item defaults only after the API succeeds. Direct browser writes for action-status/history and hearing/activity enrichment remain, so `tracked_items` write RLS and `activity_log` write RLS must remain unchanged for now.
+The browser updates selection and tracked-item defaults only after the API succeeds. Direct browser writes for hearing/activity enrichment remain, so `tracked_items` write RLS and `activity_log` write RLS must remain unchanged for now.
 
 ### item_notes RLS inventory and rollout
 
