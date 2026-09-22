@@ -10,6 +10,8 @@ API client Stage 2 also places the existing `/api/hello` `proxyFetch` implementa
 
 Frontend modularization Stage 4A makes `index.html` the page shell and moves its unchanged Babel body into `frontend/app.jsx`, the single JSX entry loaded after the four classic helper scripts. State, request callers, and rendering still live together in that entry; source-inspecting tests now read `frontend/app.jsx`.
 
+The first React presentation extraction keeps `HearingReportPanel` in `frontend/app.jsx`. `DCPolicyTracker` still owns hearing state, ordering, persistence, progress, and the visibility condition; the panel receives only hearing data, the ordered upcoming list, checking state, and recheck/close callbacks.
+
 Fixtures that protect intentional differences:
 
 | Fixture | Browser behavior | Cron behavior |

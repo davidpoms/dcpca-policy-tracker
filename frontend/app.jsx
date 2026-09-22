@@ -108,6 +108,86 @@
             return <DCPolicyTracker onLogout={handleLogout} />;
         }
 
+        function HearingReportPanel({ hearingData, itemsWithUpcomingHearings, checkingHearings, onRecheck, onClose }) {
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-screen overflow-y-auto">
+                        <div className="flex justify-between items-center mb-6">
+                            <div>
+                                <h3 className="text-2xl font-bold text-gray-900">📅 Hearing Report</h3>
+                                <p className="text-sm text-gray-500">Updated automatically each weekday morning by the cron job</p>
+                            </div>
+                            <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-2xl">×</button>
+                        </div>
+                        <div className="grid grid-cols-3 gap-4 mb-6">
+                            <div className="p-4 rounded-lg text-center bg-gray-100 text-gray-800">
+                                <div className="text-3xl font-bold">{Object.keys(hearingData).length}</div>
+                                <div className="text-sm font-medium">Items Checked</div>
+                            </div>
+                            <div className="p-4 rounded-lg text-center bg-amber-100 text-amber-800">
+                                <div className="text-3xl font-bold">{Object.values(hearingData).filter(h => h.date && !h.isPast).length}</div>
+                                <div className="text-sm font-medium">Upcoming Hearings</div>
+                            </div>
+                            <div className="p-4 rounded-lg text-center bg-blue-100 text-blue-800">
+                                <div className="text-3xl font-bold">{Object.values(hearingData).filter(h => !h.date).length}</div>
+                                <div className="text-sm font-medium">No Hearing Scheduled</div>
+                            </div>
+                        </div>
+
+                        {itemsWithUpcomingHearings.length > 0 ? (
+                            <div className="mb-6">
+                                <h4 className="text-lg font-semibold text-amber-800 mb-3">Upcoming Hearings</h4>
+                                <div className="space-y-3">
+                                    {itemsWithUpcomingHearings.map(({ item, hearing }) => (
+                                        <div key={item.id} className="p-4 border-2 border-amber-200 bg-amber-50 rounded-lg">
+                                            <div className="flex items-start justify-between">
+                                                <div className="flex-1">
+                                                    <div className="font-semibold text-gray-900 mb-1">{item.title}</div>
+                                                    <div className="flex items-center gap-3 flex-wrap">
+                                                        <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-sm text-indigo-600 hover:underline">{item.billNumber || item.id}</a>
+                                                        <span className="text-sm text-gray-600">{item.category}</span>
+                                                        {item.assignedTo && item.assignedTo !== 'Unassigned' && <span className="text-sm text-gray-600">👤 {item.assignedTo}</span>}
+                                                    </div>
+                                                </div>
+                                                <div className="text-right ml-4">
+                                                    <div className="font-bold text-amber-700 text-sm">{hearing.dateStr}</div>
+                                                    {hearing.timeStr && hearing.timeStr !== '12:00 AM' && <div className="text-xs text-amber-600">{hearing.timeStr}</div>}
+                                                    {hearing.type && <div className="text-xs text-amber-600 italic">{hearing.type}</div>}
+                                                    {hearing.location && <div className="text-xs text-gray-500 mt-1">📍 {hearing.location}</div>}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="text-center py-8 text-gray-500">No upcoming hearings found for your tracked bills.</div>
+                        )}
+
+                        {Object.entries(hearingData).filter(([, h]) => h.error).length > 0 && (
+                            <details className="mt-4">
+                                <summary className="cursor-pointer text-sm font-medium text-red-600 hover:text-red-800 py-2">
+                                    ⚠️ Fetch errors ({Object.entries(hearingData).filter(([, h]) => h.error).length} items)
+                                </summary>
+                                <div className="mt-2 space-y-2">
+                                    {Object.entries(hearingData).filter(([, h]) => h.error).map(([id, h]) => (
+                                        <div key={id} className="p-2 bg-red-50 rounded border border-red-200 text-xs text-red-700"><strong>{id}:</strong> {h.error}</div>
+                                    ))}
+                                </div>
+                            </details>
+                        )}
+
+                        <div className="mt-6 flex gap-3">
+                            <button onClick={onRecheck} disabled={checkingHearings} className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:bg-gray-400 font-medium">
+                                {checkingHearings ? 'Checking…' : '🔄 Re-check All'}
+                            </button>
+                            <button onClick={onClose} className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300">Close</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
         function DCPolicyTracker({ onLogout }) {
             // ─── App state ────────────────────────────────────────────────────────────────
             const [items, setItems] = useState([]);
@@ -1769,81 +1849,13 @@
 
                     {/* HEARING PANEL */}
                     {showHearingPanel && (
-                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                            <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-screen overflow-y-auto">
-                                <div className="flex justify-between items-center mb-6">
-                                    <div>
-                                        <h3 className="text-2xl font-bold text-gray-900">📅 Hearing Report</h3>
-                                        <p className="text-sm text-gray-500">Updated automatically each weekday morning by the cron job</p>
-                                    </div>
-                                    <button onClick={() => setShowHearingPanel(false)} className="text-gray-500 hover:text-gray-700 text-2xl">×</button>
-                                </div>
-                                <div className="grid grid-cols-3 gap-4 mb-6">
-                                    <div className="p-4 rounded-lg text-center bg-gray-100 text-gray-800">
-                                        <div className="text-3xl font-bold">{Object.keys(hearingData).length}</div>
-                                        <div className="text-sm font-medium">Items Checked</div>
-                                    </div>
-                                    <div className="p-4 rounded-lg text-center bg-amber-100 text-amber-800">
-                                        <div className="text-3xl font-bold">{Object.values(hearingData).filter(h => h.date && !h.isPast).length}</div>
-                                        <div className="text-sm font-medium">Upcoming Hearings</div>
-                                    </div>
-                                    <div className="p-4 rounded-lg text-center bg-blue-100 text-blue-800">
-                                        <div className="text-3xl font-bold">{Object.values(hearingData).filter(h => !h.date).length}</div>
-                                        <div className="text-sm font-medium">No Hearing Scheduled</div>
-                                    </div>
-                                </div>
-
-                                {itemsWithUpcomingHearings.length > 0 ? (
-                                    <div className="mb-6">
-                                        <h4 className="text-lg font-semibold text-amber-800 mb-3">Upcoming Hearings</h4>
-                                        <div className="space-y-3">
-                                            {itemsWithUpcomingHearings.map(({ item, hearing }) => (
-                                                <div key={item.id} className="p-4 border-2 border-amber-200 bg-amber-50 rounded-lg">
-                                                    <div className="flex items-start justify-between">
-                                                        <div className="flex-1">
-                                                            <div className="font-semibold text-gray-900 mb-1">{item.title}</div>
-                                                            <div className="flex items-center gap-3 flex-wrap">
-                                                                <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-sm text-indigo-600 hover:underline">{item.billNumber || item.id}</a>
-                                                                <span className="text-sm text-gray-600">{item.category}</span>
-                                                                {item.assignedTo && item.assignedTo !== 'Unassigned' && <span className="text-sm text-gray-600">👤 {item.assignedTo}</span>}
-                                                            </div>
-                                                        </div>
-                                                        <div className="text-right ml-4">
-                                                            <div className="font-bold text-amber-700 text-sm">{hearing.dateStr}</div>
-                                                            {hearing.timeStr && hearing.timeStr !== '12:00 AM' && <div className="text-xs text-amber-600">{hearing.timeStr}</div>}
-                                                            {hearing.type && <div className="text-xs text-amber-600 italic">{hearing.type}</div>}
-                                                            {hearing.location && <div className="text-xs text-gray-500 mt-1">📍 {hearing.location}</div>}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="text-center py-8 text-gray-500">No upcoming hearings found for your tracked bills.</div>
-                                )}
-
-                                {Object.entries(hearingData).filter(([, h]) => h.error).length > 0 && (
-                                    <details className="mt-4">
-                                        <summary className="cursor-pointer text-sm font-medium text-red-600 hover:text-red-800 py-2">
-                                            ⚠️ Fetch errors ({Object.entries(hearingData).filter(([, h]) => h.error).length} items)
-                                        </summary>
-                                        <div className="mt-2 space-y-2">
-                                            {Object.entries(hearingData).filter(([, h]) => h.error).map(([id, h]) => (
-                                                <div key={id} className="p-2 bg-red-50 rounded border border-red-200 text-xs text-red-700"><strong>{id}:</strong> {h.error}</div>
-                                            ))}
-                                        </div>
-                                    </details>
-                                )}
-
-                                <div className="mt-6 flex gap-3">
-                                    <button onClick={checkHearingsForTrackedItems} disabled={checkingHearings} className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:bg-gray-400 font-medium">
-                                        {checkingHearings ? 'Checking…' : '🔄 Re-check All'}
-                                    </button>
-                                    <button onClick={() => setShowHearingPanel(false)} className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300">Close</button>
-                                </div>
-                            </div>
-                        </div>
+                        <HearingReportPanel
+                            hearingData={hearingData}
+                            itemsWithUpcomingHearings={itemsWithUpcomingHearings}
+                            checkingHearings={checkingHearings}
+                            onRecheck={checkHearingsForTrackedItems}
+                            onClose={() => setShowHearingPanel(false)}
+                        />
                     )}
 
                     {showAddKeyword && (
