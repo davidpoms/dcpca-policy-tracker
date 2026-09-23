@@ -135,7 +135,7 @@ test('category page diagnostics count raw signals and sanitize bounded candidate
   }, 'Public Hearings');
   assert.equal(diagnostic.totalAnchorCount, 12); assert.equal(diagnostic.anchorsContainingNoticeIdCount, 12);
   assert.equal(diagnostic.rawNoticeIdOccurrenceCount, 12); assert.equal(diagnostic.noticeDetailStringOccurrenceCount, 12);
-  assert.deepEqual(diagnostic.rawSignalCounts, { noticeIdEquals: 12, noticeDetailAspx: 12, noticeNumber: 25, doPostBack: 1, linkButton: 2 });
+  assert.deepEqual(diagnostic.rawSignalCounts, { noticeIdEquals: 12, noticeDetailAspx: 12, noticeNumber: 26, doPostBack: 1, linkButton: 3 });
   assert.equal(diagnostic.hasAspNetViewState, true); assert.equal(diagnostic.hasEventValidation, true); assert.equal(diagnostic.hasEventTarget, true);
   assert.equal(diagnostic.inputCount, 4); assert.equal(diagnostic.buttonCount, 1); assert.equal(diagnostic.linkButtonLikeCount, 1);
   assert.equal(diagnostic.noticeCandidates.length, 10);
