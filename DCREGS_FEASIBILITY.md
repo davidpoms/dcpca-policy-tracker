@@ -33,3 +33,30 @@ Fetched target-issue and category pages include bounded structural diagnostics a
 Weekly enumeration recognizes normal allowlisted notice links first. As a narrow fallback, it may extract only an exact `NoticeDetail.aspx?NoticeId=N<digits>` substring from decoded anchor attributes, require consistency with an exact visible N-number, and construct the canonical DCRegs detail URL itself. It does not interpret or execute the surrounding JavaScript, and it does not fetch individual notice pages during enumeration.
 
 This spike does **not** establish that ingestion is viable unless the September 18, 2026 issue is positively identified, a target issue or descended category page is fetched, and at least one notice is enumerated from that target chain. Generic browse-page notices and successful parsing of the two known individual notices do not count. No production workflow, tracked item, candidate record, report, schedule, or database table is created or modified.
+
+## Final live Preview result — September 22, 2026
+
+The Vercel Preview deployment successfully demonstrated:
+
+- `directFetchViable=true`
+- `proxyRequired=false`
+- `issueEnumerationViable=true`
+- `noticeDetailViable=true`
+- `noticeTextViable=false`
+
+The target weekly issue was September 18, 2026, with DCRegs `issueId=1209`.
+
+The observed production-like path was:
+
+1. Fetch the DCRegs homepage directly from Vercel.
+2. Submit the constrained ASP.NET **Browse through DCR Issues** form.
+3. Identify the September 18, 2026 issue.
+4. Fetch the issue's category pages.
+5. Enumerate notice IDs from the validated issue/category chain.
+6. Parse the known notice-detail pages directly.
+
+The successful probe made 12 total HTTP requests: one constrained browse POST and zero ScrapingBee requests. The browse POST completed in roughly 25 seconds within its bounded 30-second timeout.
+
+Automated weekly DC Register discovery is technically viable without ScrapingBee. Based on this spike, ScrapingBee should not be a production dependency. Notice-text or document retrieval was not proven and remains a separate future capability. The slow WebForms browse POST is a production-design consideration.
+
+This endpoint remains a diagnostic feasibility spike and is not the production ingestion architecture. The temporary Vercel Deployment Protection Exception used during live validation was removed afterward.
