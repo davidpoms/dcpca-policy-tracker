@@ -303,11 +303,13 @@
 
             const loadFromSupabase = async () => {
                 try {
-                    const { data: trackedData, error: trackedError } = await supabase
-                        .from('tracked_items').select('*').order('tracked_at', { ascending: false });
-                    if (trackedError) throw trackedError;
+                    const response = await window.DCPCAFrontend.appDataRequest({ action: 'app.bootstrap.read' });
+                    const payload = await response.json();
+                    const bootstrap = response.ok ? payload : (payload?.partial || {});
+                    const hasDataset = (name) => Object.prototype.hasOwnProperty.call(bootstrap, name);
 
-                    if (trackedData) {
+                    if (hasDataset('trackedItems') && bootstrap.trackedItems) {
+                        const trackedData = bootstrap.trackedItems;
                         const itemsSet = new Set(trackedData.map(item => item.id));
                         setSelectedItems(itemsSet);
 
@@ -361,49 +363,43 @@
                         if (Object.keys(hearingMap).length > 0) setHearingData(hearingMap);
                     }
 
-                    const { data: notesData, error: notesError } = await supabase.from('item_notes').select('*');
-                    if (notesError) throw notesError;
-                    if (notesData) {
+                    if (hasDataset('itemNotes') && bootstrap.itemNotes) {
                         const notesMap = {};
-                        notesData.forEach(note => { notesMap[note.item_id] = note.note_text; });
+                        bootstrap.itemNotes.forEach(note => { notesMap[note.item_id] = note.note_text; });
                         setItemNotes(notesMap);
                     }
 
-                    const { data: keywordsData, error: keywordsError } = await supabase
-                        .from('tracked_keywords').select('*').order('added_at', { ascending: true });
-                    if (keywordsError) throw keywordsError;
-                    if (keywordsData) setTrackedKeywords(keywordsData.map(k => k.keyword));
+                    if (hasDataset('trackedKeywords') && bootstrap.trackedKeywords) {
+                        setTrackedKeywords(bootstrap.trackedKeywords.map(k => k.keyword));
+                    }
 
-                    const { data: committeesData, error: committeesError } = await supabase
-                        .from('tracked_committees').select('*').order('added_at', { ascending: true });
-                    if (committeesError) throw committeesError;
-                    if (committeesData) setTrackedCommittees(committeesData.map(c => c.committee_name));
+                    if (hasDataset('trackedCommittees') && bootstrap.trackedCommittees) {
+                        setTrackedCommittees(bootstrap.trackedCommittees.map(c => c.committee_name));
+                    }
 
-                    const { data: sponsorsData, error: sponsorsError } = await supabase
-                        .from('tracked_sponsors').select('*').order('added_at', { ascending: true });
-                    if (sponsorsError) throw sponsorsError;
-                    if (sponsorsData) setTrackedSponsors(sponsorsData.map(s => s.sponsor_name));
+                    if (hasDataset('trackedSponsors') && bootstrap.trackedSponsors) {
+                        setTrackedSponsors(bootstrap.trackedSponsors.map(s => s.sponsor_name));
+                    }
 
-                    const { data: agenciesData } = await supabase
-                        .from('tracked_agencies').select('*').order('agency_name', { ascending: true });
-                    if (agenciesData) setTrackedAgencies(agenciesData.map(a => a.agency_name));
+                    if (hasDataset('trackedAgencies') && bootstrap.trackedAgencies) {
+                        setTrackedAgencies(bootstrap.trackedAgencies.map(a => a.agency_name));
+                    }
 
-                    const { data: membersData, error: membersError } = await supabase
-                        .from('team_members').select('*').eq('active', true).order('name', { ascending: true });
-                    if (membersError) throw membersError;
-                    if (membersData) setTeamMembers(membersData);
+                    if (hasDataset('teamMembers') && bootstrap.teamMembers) {
+                        setTeamMembers(bootstrap.teamMembers);
+                    }
 
                     // Load status history
-                    const { data: historyData } = await supabase
-                        .from('bill_status_history').select('*').order('changed_at', { ascending: false });
-                    if (historyData) {
+                    if (hasDataset('billStatusHistory') && bootstrap.billStatusHistory) {
                         const histMap = {};
-                        historyData.forEach(h => {
+                        bootstrap.billStatusHistory.forEach(h => {
                             if (!histMap[h.item_id]) histMap[h.item_id] = [];
                             histMap[h.item_id].push(h);
                         });
                         setStatusHistory(histMap);
                     }
+
+                    if (!response.ok) throw new Error(payload?.error || 'Service unavailable');
 
                 } catch (err) {
                     console.error('Error loading from Supabase:', err);
@@ -413,11 +409,22 @@
 
             const loadActivityLog = async () => {
                 try {
-                    const { data, error } = await supabase.from('activity_log').select('*')
-                        .order('created_at', { ascending: false }).limit(100);
-                    if (error) throw error;
-                    setActivityLog(data || []);
+                    const response = await window.DCPCAFrontend.appDataRequest({ action: 'activityLog.list' });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data?.error || 'Service unavailable');
+                    setActivityLog(data.activityLog || []);
                 } catch (err) { console.error('Error loading activity log:', err); }
+            };
+
+            const refreshTeamMembers = async () => {
+                try {
+                    const response = await window.DCPCAFrontend.appDataRequest({ action: 'teamMembers.list' });
+                    if (!response.ok) return;
+                    const data = await response.json();
+                    setTeamMembers(data.teamMembers || []);
+                } catch {
+                    // Preserve existing post-mutation behavior: a member-list refresh failure is nonfatal.
+                }
             };
 
             const loadCouncilPeriods = async () => {
@@ -1158,8 +1165,7 @@
                         });
                     const data = await response.json();
                     if (!response.ok) throw new Error(data?.error || 'Failed to add team member');
-                    const { data: membersData } = await supabase.from('team_members').select('*').eq('active', true).order('name', { ascending: true });
-                    if (membersData) setTeamMembers(membersData);
+                    await refreshTeamMembers();
                     setTeamMemberForm({ name: '', email: '' });
                 } catch (err) { setError('Failed to add team member: ' + err.message); }
             };
@@ -1184,8 +1190,7 @@
                     if (oldMember && oldMember.name !== teamMemberForm.name) {
                         setItems(items.map(item => item.assignedTo === oldMember.name ? { ...item, assignedTo: teamMemberForm.name } : item));
                     }
-                    const { data: membersData } = await supabase.from('team_members').select('*').eq('active', true).order('name', { ascending: true });
-                    if (membersData) setTeamMembers(membersData);
+                    await refreshTeamMembers();
                     setEditingTeamMember(null);
                     setTeamMemberForm({ name: '', email: '' });
                 } catch (err) { setError('Failed to update team member: ' + err.message); }
@@ -1198,8 +1203,7 @@
                     const response = await window.DCPCAFrontend.appDataRequest({ action: 'teamMember.delete', teamMemberId: String(memberId) });
                     const data = await response.json();
                     if (!response.ok) throw new Error(data?.error || 'Failed to delete team member');
-                    const { data: membersData } = await supabase.from('team_members').select('*').eq('active', true).order('name', { ascending: true });
-                    if (membersData) setTeamMembers(membersData);
+                    await refreshTeamMembers();
                 } catch (err) { setError('Failed to delete team member: ' + err.message); }
             };
 

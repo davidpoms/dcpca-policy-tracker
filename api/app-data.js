@@ -1,6 +1,9 @@
 import { getSessionCookieValue, validateSignedSession } from '../lib/session.js';
 
 const ALLOWED_ACTIONS = new Set([
+  'app.bootstrap.read',
+  'activityLog.list',
+  'teamMembers.list',
   'keyword.add',
   'keyword.remove',
   'committee.add',
@@ -29,6 +32,17 @@ const ALLOWED_ACTIONS = new Set([
   'trackedItem.hearing.persist',
   'trackedItem.hearings.audit'
 ]);
+
+const BOOTSTRAP_SELECTS = Object.freeze({
+  trackedItems: 'id,title,bill_number,category,status,last_status,committees,date,description,link,source,agency,introduced_by,co_introducers,assigned_to,priority,action_status,is_new,is_manual_entry,has_new_activity,activity_summary,last_checked_at,hearing_checked_at,tracked_at,notice_id,register_issue,register_notes,next_hearing_date,hearing_type,hearing_location,additional_information,manual_summary,committee_re_referral,latest_activity_date,latest_activity_label,activity_count,deadline,activity_timeline',
+  itemNotes: 'item_id,note_text',
+  trackedKeywords: 'keyword',
+  trackedCommittees: 'committee_name',
+  trackedSponsors: 'sponsor_name',
+  trackedAgencies: 'agency_name',
+  teamMembers: 'id,name,email',
+  billStatusHistory: 'item_id,old_status,new_status,change_label,changed_at'
+});
 
 function isExactBody(body, allowedKeys) {
   const actualKeys = Object.keys(body || {}).sort();
@@ -132,6 +146,12 @@ async function getTeamMember(url, serviceKey, teamMemberId) {
   return Array.isArray(members) ? members[0] : null;
 }
 
+async function readTableRows(url, serviceKey, table, query) {
+  const response = await supabaseTableRequest(url, serviceKey, table, 'GET', null, query);
+  const rows = await response.json();
+  return Array.isArray(rows) ? rows : [];
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
@@ -176,6 +196,100 @@ export default async function handler(req, res) {
 
   try {
     switch (action) {
+      case 'app.bootstrap.read': {
+        if (!isExactBody(body, ['action'])) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+
+        const partial = {};
+        const fatalRead = async (dataset, table, query) => {
+          try {
+            partial[dataset] = await readTableRows(supabaseUrl, serviceKey, table, query);
+            return false;
+          } catch {
+            console.error('[app-data] bootstrap read failed', { dataset });
+            return true;
+          }
+        };
+
+        const fatalResponse = (failedDataset) => res.status(500).json({
+          error: 'Service unavailable',
+          failedDataset,
+          partial
+        });
+
+        let failure = await fatalRead('trackedItems', 'tracked_items', `?select=${BOOTSTRAP_SELECTS.trackedItems}&order=tracked_at.desc`);
+        if (failure) return fatalResponse('trackedItems');
+        failure = await fatalRead('itemNotes', 'item_notes', `?select=${BOOTSTRAP_SELECTS.itemNotes}`);
+        if (failure) return fatalResponse('itemNotes');
+        failure = await fatalRead('trackedKeywords', 'tracked_keywords', `?select=${BOOTSTRAP_SELECTS.trackedKeywords}&order=added_at.asc`);
+        if (failure) return fatalResponse('trackedKeywords');
+        failure = await fatalRead('trackedCommittees', 'tracked_committees', `?select=${BOOTSTRAP_SELECTS.trackedCommittees}&order=added_at.asc`);
+        if (failure) return fatalResponse('trackedCommittees');
+        failure = await fatalRead('trackedSponsors', 'tracked_sponsors', `?select=${BOOTSTRAP_SELECTS.trackedSponsors}&order=added_at.asc`);
+        if (failure) return fatalResponse('trackedSponsors');
+
+        try {
+          partial.trackedAgencies = await readTableRows(
+            supabaseUrl, serviceKey, 'tracked_agencies',
+            `?select=${BOOTSTRAP_SELECTS.trackedAgencies}&order=agency_name.asc`
+          );
+        } catch {
+          console.error('[app-data] tolerated bootstrap read failed', { dataset: 'trackedAgencies' });
+          partial.trackedAgencies = null;
+        }
+
+        failure = await fatalRead(
+          'teamMembers', 'team_members',
+          `?select=${BOOTSTRAP_SELECTS.teamMembers}&active=eq.true&order=name.asc`
+        );
+        if (failure) return fatalResponse('teamMembers');
+
+        try {
+          partial.billStatusHistory = await readTableRows(
+            supabaseUrl, serviceKey, 'bill_status_history',
+            `?select=${BOOTSTRAP_SELECTS.billStatusHistory}&order=changed_at.desc`
+          );
+        } catch {
+          console.error('[app-data] tolerated bootstrap read failed', { dataset: 'billStatusHistory' });
+          partial.billStatusHistory = null;
+        }
+
+        return res.status(200).json({ ok: true, ...partial });
+      }
+
+      case 'activityLog.list': {
+        if (!isExactBody(body, ['action'])) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        try {
+          const activityLog = await readTableRows(
+            supabaseUrl, serviceKey, 'activity_log',
+            '?select=id,action,item_title,details,created_at&order=created_at.desc&limit=100'
+          );
+          return res.status(200).json({ ok: true, activityLog });
+        } catch {
+          console.error('[app-data] list read failed', { dataset: 'activityLog' });
+          return res.status(500).json({ error: 'Service unavailable' });
+        }
+      }
+
+      case 'teamMembers.list': {
+        if (!isExactBody(body, ['action'])) {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        try {
+          const teamMembers = await readTableRows(
+            supabaseUrl, serviceKey, 'team_members',
+            '?select=id,name,email&active=eq.true&order=name.asc'
+          );
+          return res.status(200).json({ ok: true, teamMembers });
+        } catch {
+          console.error('[app-data] list read failed', { dataset: 'teamMembers' });
+          return res.status(500).json({ error: 'Service unavailable' });
+        }
+      }
+
       case 'keyword.add': {
         if (!isExactBody(body, ['action', 'keywords'])) {
           return res.status(400).json({ error: 'Invalid request' });

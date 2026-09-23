@@ -966,6 +966,9 @@ test('config-table RLS keeps anon reads and removes anon writes', () => {
   const versionedMigration = readRepoText('migrations/2026-09-15-tighten-config-table-rls.sql');
   const appData = readRepoText('api/app-data.js');
   const expectedActions = [
+    'app.bootstrap.read',
+    'activityLog.list',
+    'teamMembers.list',
     'keyword.add',
     'keyword.remove',
     'committee.add',
@@ -1062,8 +1065,8 @@ test('tracked_items and activity_log RLS allow only anon reads after browser wri
   ]);
 
   const html = readRepoText('frontend/app.jsx');
-  assert.match(html, /\.from\('tracked_items'\)\.select/);
-  assert.match(html, /\.from\('activity_log'\)\.select/);
+  assert.doesNotMatch(html, /\.from\('tracked_items'\)\.select/);
+  assert.doesNotMatch(html, /\.from\('activity_log'\)\.select/);
   assert.doesNotMatch(html, /\.from\('tracked_items'\)\s*\.\s*(?:insert|update|delete)\s*\(/);
   assert.doesNotMatch(html, /\.from\('activity_log'\)\s*\.\s*insert\s*\(/);
   const appData = readRepoText('api/app-data.js');
@@ -1285,10 +1288,11 @@ test('api/app-data.js implements opaque-ID team member mutation contracts', asyn
   }
 });
 
-test('team member frontend mutations use app-data while reads and unrelated item writes remain direct', () => {
+test('team member frontend mutations and reads use app-data while unrelated item writes remain scoped', () => {
   const appText = readRepoText('frontend/app.jsx');
 
-  assert.match(appText, /\.from\('team_members'\)\.select\('\*'\)/);
+  assert.doesNotMatch(appText, /\.from\('team_members'\)\.select/);
+  assert.match(appText, /action:\s*'teamMembers\.list'/);
   assert.doesNotMatch(appText, /from\('team_members'\)\s*\.insert\(/i);
   assert.doesNotMatch(appText, /from\('team_members'\)\s*\.update\(/i);
   assert.match(appText, /action:\s*'teamMember\.create'/);
@@ -2154,10 +2158,11 @@ test('api/app-data.js treats note activity logging as nonfatal and note DB failu
 });
 
 
-test('repository guardrails keep note mutations behind the authenticated API and preserve direct item_notes reads', () => {
+test('repository guardrails keep note mutations and reads behind the authenticated API', () => {
   const appText = readRepoText('frontend/app.jsx');
 
-  assert.match(appText, /from\('item_notes'\)\.select\('\*'\)/);
+  assert.doesNotMatch(appText, /from\('item_notes'\)\.select/);
+  assert.match(appText, /action:\s*'app\.bootstrap\.read'/);
   assert.match(appText, /action:\s*'note\.save'/);
   assert.match(appText, /action:\s*'note\.delete'/);
   assert.doesNotMatch(appText, /from\('item_notes'\)\s*\.upsert/i);

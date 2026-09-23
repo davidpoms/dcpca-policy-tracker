@@ -17,7 +17,8 @@ test('ActivityLogModal is presentational and accepts only activityLog and onClos
 
 test('DCPolicyTracker keeps activity state, load timing, and the modal condition', () => {
   assert.match(app, /const \[activityLog, setActivityLog\] = useState\(\[\]\)/);
-  assert.match(app, /const loadActivityLog = async \(\) => \{[\s\S]*?\.from\('activity_log'\)\.select\('\*'\)[\s\S]*?\.order\('created_at', \{ ascending: false \}\)\.limit\(100\)/);
+  assert.match(app, /const loadActivityLog = async \(\) => \{[\s\S]*?appDataRequest\(\{ action: 'activityLog\.list' \}\)[\s\S]*?setActivityLog\(data\.activityLog \|\| \[\]\)/);
+  assert.doesNotMatch(app, /\.from\('activity_log'\)\.select/);
   assert.match(app, /onClick=\{\(\) => \{ setShowActivityLog\(true\); loadActivityLog\(\); \}\}/);
   assert.match(app, /\{showActivityLog && \(\s*<ActivityLogModal\s+activityLog=\{activityLog\}\s+onClose=\{\(\) => setShowActivityLog\(false\)\}\s*\/>\s*\)\}/);
   assert.equal((app.match(/<ActivityLogModal\b/g) || []).length, 1);
