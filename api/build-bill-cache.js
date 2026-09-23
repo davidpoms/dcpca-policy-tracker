@@ -68,7 +68,7 @@ async function sbPatch(table, filter, body) {
 async function limsPost(endpoint, body) {
     const r = await fetch(PROXY_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CRON_SECRET}` },
         body: JSON.stringify({ endpoint, method: 'POST', body })
     });
     if (!r.ok) throw new Error(`Proxy POST ${endpoint}: ${r.status}`);
@@ -80,7 +80,7 @@ async function limsPost(endpoint, body) {
 async function limsGet(endpoint) {
     const r = await fetch(PROXY_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CRON_SECRET}` },
         body: JSON.stringify({ endpoint, method: 'GET', body: null })
     });
     if (!r.ok) throw new Error(`Proxy GET ${endpoint}: ${r.status}`);

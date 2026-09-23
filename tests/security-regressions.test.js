@@ -249,7 +249,7 @@ test('api/session.js validates real sessions and rejects missing or invalid ones
 });
 
 test('api/hello.js returns 500 without LIMS_API_KEY and does not fetch upstream', async () => {
-  const handler = await importFresh('api/hello.js');
+  const { createSignedSession } = await importFreshModule('lib/session.js');
   const originalFetch = global.fetch;
   let fetchCalled = false;
 
@@ -259,8 +259,14 @@ test('api/hello.js returns 500 without LIMS_API_KEY and does not fetch upstream'
   };
 
   try {
-    await withEnv({ LIMS_API_KEY: undefined }, async () => {
-      const req = { method: 'POST', body: { endpoint: '/SomeEndpoint', method: 'GET' } };
+    await withEnv({ LIMS_API_KEY: undefined, SESSION_SECRET: 'hello-session-secret' }, async () => {
+      const handler = await importFresh('api/hello.js');
+      const cookie = createSignedSession(Date.now() + 60 * 1000);
+      const req = {
+        method: 'POST',
+        headers: { cookie: `dc_tracker_session=${encodeURIComponent(cookie)}` },
+        body: { endpoint: '/CouncilPeriods', method: 'GET', body: null }
+      };
       const res = makeRes();
 
       await handler(req, res);
@@ -273,6 +279,269 @@ test('api/hello.js returns 500 without LIMS_API_KEY and does not fetch upstream'
     });
   } finally {
     global.fetch = originalFetch;
+  }
+});
+
+test('api/hello.js accepts only authenticated, exact LIMS contracts', async () => {
+  const { createSignedSession } = await importFreshModule('lib/session.js');
+  const originalFetch = global.fetch;
+  const upstreamCalls = [];
+  global.fetch = async (url, options) => {
+    upstreamCalls.push({ url, options });
+    return { ok: true, json: async () => ({ upstream: true }) };
+  };
+
+  try {
+    await withEnv({
+      LIMS_API_KEY: 'lims-test-key',
+      SESSION_SECRET: 'hello-session-secret',
+      CRON_SECRET: 'hello-cron-secret'
+    }, async () => {
+      const handler = await importFresh('api/hello.js');
+      const validCookie = `dc_tracker_session=${encodeURIComponent(createSignedSession(Date.now() + 60 * 1000))}`;
+      const validRequest = {
+        endpoint: '/CouncilPeriods',
+        method: 'GET',
+        body: null
+      };
+
+      const invoke = async (body = validRequest, overrides = {}) => {
+        const res = makeRes();
+        await handler({
+          method: 'POST',
+          headers: { cookie: validCookie, ...(overrides.headers || {}) },
+          body,
+          query: overrides.query,
+          ...overrides
+        }, res);
+        return res;
+      };
+
+      const sessionSuccess = await invoke();
+      assert.equal(sessionSuccess.statusCode, 200);
+      assert.deepEqual(sessionSuccess.body, { upstream: true });
+      assert.equal(sessionSuccess.headers['Access-Control-Allow-Origin'], undefined);
+
+      const missingSessionRes = makeRes();
+      await handler({ method: 'POST', headers: {}, body: validRequest }, missingSessionRes);
+      assert.equal(missingSessionRes.statusCode, 401);
+
+      const invalidSessionRes = makeRes();
+      await handler({
+        method: 'POST',
+        headers: { cookie: 'dc_tracker_session=invalid' },
+        body: validRequest
+      }, invalidSessionRes);
+      assert.equal(invalidSessionRes.statusCode, 401);
+
+      const cronRes = makeRes();
+      await handler({
+        method: 'POST',
+        headers: { authorization: 'Bearer hello-cron-secret' },
+        body: { endpoint: '/LegislationDetails/B26-0001', method: 'GET', body: null }
+      }, cronRes);
+      assert.equal(cronRes.statusCode, 200);
+
+      for (const authorization of [undefined, 'Bearer wrong-secret', 'hello-cron-secret']) {
+        const res = makeRes();
+        await handler({
+          method: 'POST',
+          headers: authorization
+            ? { cookie: validCookie, authorization }
+            : { 'x-vercel-protection-bypass': 'hello-cron-secret' },
+          body: validRequest
+        }, res);
+        assert.equal(res.statusCode, 401);
+      }
+
+      for (const method of ['GET', 'OPTIONS', 'PUT', 'PATCH', 'DELETE']) {
+        const res = makeRes();
+        await handler({ method, headers: { cookie: validCookie }, body: validRequest }, res);
+        assert.equal(res.statusCode, 405, method);
+      }
+
+      assert.equal((await invoke(validRequest, { query: { endpoint: '/CouncilPeriods' } })).statusCode, 400);
+      assert.equal((await invoke({ endpoint: '/Arbitrary', method: 'GET', body: null })).statusCode, 400);
+      assert.equal((await invoke({ endpoint: '/CouncilPeriods', method: 'PUT', body: null })).statusCode, 400);
+      assert.equal((await invoke({ endpoint: '/BulkData/Anything', method: 'POST', body: {} })).statusCode, 400);
+      assert.equal((await invoke({ ...validRequest, extra: true })).statusCode, 400);
+
+      for (const id of ['B26-0001?x=1', 'B26-0001/other', 'X26-0001', 'B26-', 'B26-00001', '../B26-0001']) {
+        const res = await invoke({ endpoint: `/LegislationDetails/${id}`, method: 'GET', body: null });
+        assert.equal(res.statusCode, 400, id);
+      }
+
+      const validKeywordSearch = {
+        endpoint: '/SearchLegislation',
+        method: 'POST',
+        body: { Keyword: 'housing', CategoryId: 0, CouncilPeriodId: 26, RowLimit: 20, OffSet: 0 }
+      };
+      const validCategorySearch = {
+        endpoint: '/SearchLegislation',
+        method: 'POST',
+        body: { Keyword: '', CategoryId: 0, CouncilPeriodId: 26, RowLimit: 100, OffSet: 100 }
+      };
+      for (const badSearch of [
+        { ...validKeywordSearch, body: { ...validKeywordSearch.body, extra: true } },
+        { ...validKeywordSearch, body: { ...validKeywordSearch.body, Keyword: 3 } },
+        { ...validKeywordSearch, body: { ...validKeywordSearch.body, CategoryId: 1 } },
+        { ...validKeywordSearch, body: { ...validKeywordSearch.body, CouncilPeriodId: '26' } },
+        { ...validKeywordSearch, body: { ...validKeywordSearch.body, RowLimit: 50 } },
+        { ...validKeywordSearch, body: { ...validKeywordSearch.body, OffSet: 1 } },
+        { ...validCategorySearch, body: { ...validCategorySearch.body, Keyword: 'housing' } },
+        { ...validCategorySearch, body: { ...validCategorySearch.body, OffSet: 50 } }
+      ]) {
+        assert.equal((await invoke(badSearch)).statusCode, 400);
+      }
+
+      assert.equal((await invoke({ endpoint: '/LegislationDetails/B26-0001', method: 'GET', body: null })).statusCode, 200);
+      assert.equal((await invoke({ endpoint: '/LegislationDetails/PR26-0001', method: 'GET', body: null })).statusCode, 200);
+      assert.equal((await invoke({ endpoint: '/LegislationDetails/HN26-0162', method: 'GET', body: null })).statusCode, 200);
+      assert.equal((await invoke(validKeywordSearch)).statusCode, 200);
+      assert.equal((await invoke(validCategorySearch)).statusCode, 200);
+
+      assert.deepEqual(upstreamCalls.map(({ url, options }) => ({
+        url,
+        method: options.method,
+        body: options.body
+      })), [
+        { url: 'https://lims.dccouncil.gov/api/v2/PublicData/CouncilPeriods', method: 'GET', body: undefined },
+        { url: 'https://lims.dccouncil.gov/api/v2/PublicData/LegislationDetails/B26-0001', method: 'GET', body: undefined },
+        { url: 'https://lims.dccouncil.gov/api/v2/PublicData/LegislationDetails/B26-0001', method: 'GET', body: undefined },
+        { url: 'https://lims.dccouncil.gov/api/v2/PublicData/LegislationDetails/PR26-0001', method: 'GET', body: undefined },
+        { url: 'https://lims.dccouncil.gov/api/v2/PublicData/LegislationDetails/HN26-0162', method: 'GET', body: undefined },
+        {
+          url: 'https://lims.dccouncil.gov/api/v2/PublicData/SearchLegislation',
+          method: 'POST',
+          body: JSON.stringify(validKeywordSearch.body)
+        },
+        {
+          url: 'https://lims.dccouncil.gov/api/v2/PublicData/SearchLegislation',
+          method: 'POST',
+          body: JSON.stringify(validCategorySearch.body)
+        }
+      ]);
+
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('api/hello.js keeps upstream and fetch failures secret-safe', async () => {
+  const { createSignedSession } = await importFreshModule('lib/session.js');
+  const originalFetch = global.fetch;
+  const originalConsoleError = console.error;
+  const errors = [];
+  const fakeKey = 'lims-test-key-that-must-not-leak';
+  console.error = (...args) => errors.push(args);
+
+  try {
+    await withEnv({ LIMS_API_KEY: fakeKey, SESSION_SECRET: 'hello-session-secret' }, async () => {
+      const handler = await importFresh('api/hello.js');
+      const headers = {
+        cookie: `dc_tracker_session=${encodeURIComponent(createSignedSession(Date.now() + 60 * 1000))}`
+      };
+      const body = { endpoint: '/CouncilPeriods', method: 'GET', body: null };
+
+      const upstreamFailures = [];
+      for (const status of [401, 502]) {
+        global.fetch = async () => ({
+          ok: false,
+          status,
+          statusText: 'Upstream response',
+          text: async () => `upstream echoed ${fakeKey}`
+        });
+        const upstreamFailure = makeRes();
+        await handler({ method: 'POST', headers, body }, upstreamFailure);
+        assert.equal(upstreamFailure.statusCode, status);
+        assert.equal(upstreamFailure.body.error, 'LIMS API error');
+        assert.equal(upstreamFailure.body.details, 'Upstream request failed');
+        upstreamFailures.push(upstreamFailure.body);
+      }
+
+      global.fetch = async () => {
+        throw new Error(`fetch failure leaked ${fakeKey}`);
+      };
+      const fetchFailure = makeRes();
+      await handler({ method: 'POST', headers, body }, fetchFailure);
+      assert.equal(fetchFailure.statusCode, 500);
+      assert.equal(fetchFailure.body.error, 'Proxy failed');
+      assert.equal(fetchFailure.body.details, 'Upstream request failed');
+
+      const observableOutput = JSON.stringify({ upstreamFailures, fetchFailure: fetchFailure.body, errors });
+      assert.doesNotMatch(observableOutput, new RegExp(fakeKey));
+    });
+  } finally {
+    global.fetch = originalFetch;
+    console.error = originalConsoleError;
+  }
+});
+
+test('build-bill-cache sends its cron secret only to its fixed local hello request', async () => {
+  const originalFetch = global.fetch;
+  const originalSetTimeout = global.setTimeout;
+  const calls = [];
+  global.setTimeout = (callback) => {
+    callback();
+    return 0;
+  };
+
+  try {
+    await withEnv({
+      SUPABASE_URL: 'https://supabase.test',
+      SUPABASE_SERVICE_KEY: 'supabase-service-key',
+      CRON_SECRET: 'cache-cron-secret',
+      VERCEL_URL: 'preview.example.test'
+    }, async () => {
+      const handler = await importFresh('api/build-bill-cache.js');
+      global.fetch = async (url, options = {}) => {
+        calls.push({ url, options });
+        if (url === 'https://supabase.test/rest/v1/lims_cache_cursor?council_period_id=eq.26') {
+          return {
+            ok: true,
+            json: async () => [{
+              bill_numbers: ['B26-0001'],
+              position: 0,
+              total: 1,
+              completed: false
+            }]
+          };
+        }
+        if (url === 'https://preview.example.test/api/hello') {
+          return { ok: true, json: async () => ({ title: 'Cached bill' }) };
+        }
+        return { ok: true, json: async () => [], text: async () => '' };
+      };
+
+      const res = makeRes();
+      await handler({
+        method: 'POST',
+        headers: { authorization: 'Bearer cache-cron-secret' },
+        query: {},
+        body: {}
+      }, res);
+      assert.equal(res.statusCode, 200);
+
+      const helloCall = calls.find(call => call.url === 'https://preview.example.test/api/hello');
+      assert.ok(helloCall);
+      assert.deepEqual(helloCall.options.headers, {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer cache-cron-secret'
+      });
+      assert.equal(helloCall.options.body, JSON.stringify({
+        endpoint: '/LegislationDetails/B26-0001',
+        method: 'GET',
+        body: null
+      }));
+
+      for (const call of calls.filter(call => call !== helloCall)) {
+        assert.notEqual(call.options.headers?.Authorization, 'Bearer cache-cron-secret');
+      }
+    });
+  } finally {
+    global.fetch = originalFetch;
+    global.setTimeout = originalSetTimeout;
   }
 });
 
