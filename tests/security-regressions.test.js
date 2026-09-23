@@ -969,6 +969,8 @@ test('config-table historical RLS migration removes anon writes while canonical 
     'app.bootstrap.read',
     'activityLog.list',
     'teamMembers.list',
+    'limsCache.committee.search',
+    'limsCache.sponsor.search',
     'keyword.add',
     'keyword.remove',
     'committee.add',

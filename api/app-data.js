@@ -4,6 +4,8 @@ const ALLOWED_ACTIONS = new Set([
   'app.bootstrap.read',
   'activityLog.list',
   'teamMembers.list',
+  'limsCache.committee.search',
+  'limsCache.sponsor.search',
   'keyword.add',
   'keyword.remove',
   'committee.add',
@@ -43,6 +45,8 @@ const BOOTSTRAP_SELECTS = Object.freeze({
   teamMembers: 'id,name,email',
   billStatusHistory: 'item_id,old_status,new_status,change_label,changed_at'
 });
+
+const LIMS_CACHE_SELECT = 'bill_number,title,category,status,introduced_by,co_introducers,committees,introduction_date';
 
 function isExactBody(body, allowedKeys) {
   const actualKeys = Object.keys(body || {}).sort();
@@ -150,6 +154,20 @@ async function readTableRows(url, serviceKey, table, query) {
   const response = await supabaseTableRequest(url, serviceKey, table, 'GET', null, query);
   const rows = await response.json();
   return Array.isArray(rows) ? rows : [];
+}
+
+async function readCacheRows(url, serviceKey, query) {
+  const response = await fetch(`${url}/rest/v1/lims_bill_cache${query}`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: serviceKey,
+      Authorization: `Bearer ${serviceKey}`
+    }
+  });
+  if (!response.ok) return { ok: false, rows: [] };
+  const rows = await response.json();
+  return { ok: true, rows: Array.isArray(rows) ? rows : [] };
 }
 
 export default async function handler(req, res) {
@@ -288,6 +306,52 @@ export default async function handler(req, res) {
           console.error('[app-data] list read failed', { dataset: 'teamMembers' });
           return res.status(500).json({ error: 'Service unavailable' });
         }
+      }
+
+      case 'limsCache.committee.search': {
+        if (!isExactBody(body, ['action', 'councilPeriodId', 'committee']) ||
+            !Number.isInteger(body.councilPeriodId) || body.councilPeriodId <= 0 ||
+            typeof body.committee !== 'string' || body.committee.trim() === '') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        const pattern = encodeURIComponent(`%${body.committee}%`);
+        const result = await readCacheRows(
+          supabaseUrl,
+          serviceKey,
+          `?select=${LIMS_CACHE_SELECT}&council_period_id=eq.${body.councilPeriodId}&committees=ilike.${pattern}`
+        );
+        if (!result.ok) {
+          console.error('[app-data] cache read failed', { searchType: 'committee' });
+          return res.status(500).json({ error: 'Service unavailable' });
+        }
+        return res.status(200).json({ ok: true, rows: result.rows });
+      }
+
+      case 'limsCache.sponsor.search': {
+        if (!isExactBody(body, ['action', 'councilPeriodId', 'sponsor']) ||
+            !Number.isInteger(body.councilPeriodId) || body.councilPeriodId <= 0 ||
+            typeof body.sponsor !== 'string' || body.sponsor.trim() === '') {
+          return res.status(400).json({ error: 'Invalid request' });
+        }
+        const pattern = encodeURIComponent(`%${body.sponsor}%`);
+        const baseQuery = `?select=${LIMS_CACHE_SELECT}&council_period_id=eq.${body.councilPeriodId}`;
+        const [byIntroducer, byCoIntroducer] = await Promise.all([
+          readCacheRows(supabaseUrl, serviceKey, `${baseQuery}&introduced_by=ilike.${pattern}`),
+          readCacheRows(supabaseUrl, serviceKey, `${baseQuery}&co_introducers=ilike.${pattern}`)
+        ]);
+        if (!byIntroducer.ok) {
+          console.error('[app-data] cache read failed', { searchType: 'sponsor', field: 'introduced_by' });
+        }
+        if (!byCoIntroducer.ok) {
+          console.error('[app-data] cache read failed', { searchType: 'sponsor', field: 'co_introducers' });
+        }
+        const seen = new Set();
+        const rows = [...byIntroducer.rows, ...byCoIntroducer.rows].filter(row => {
+          if (seen.has(row.bill_number)) return false;
+          seen.add(row.bill_number);
+          return true;
+        });
+        return res.status(200).json({ ok: true, rows });
       }
 
       case 'keyword.add': {

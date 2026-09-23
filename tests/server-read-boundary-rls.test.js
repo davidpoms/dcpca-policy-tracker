@@ -80,16 +80,16 @@ test('write restrictions and server-only table access remain closed', () => {
   assert.doesNotMatch(allSql, /\b(?:GRANT|REVOKE)\b[\s\S]*?\b(?:anon|public)\b/i);
 });
 
-test('server read actions remain in app-data and browser reads remain limited to lims cache', () => {
+test('server read actions remain in app-data while the cache read policy awaits its separate migration', () => {
   const appData = read('api/app-data.js');
   const frontend = read('frontend/app.jsx');
-  for (const action of ['app.bootstrap.read', 'activityLog.list', 'teamMembers.list']) {
+  for (const action of ['app.bootstrap.read', 'activityLog.list', 'teamMembers.list', 'limsCache.committee.search', 'limsCache.sponsor.search']) {
     assert.ok(appData.includes(`'${action}'`), action);
   }
   assert.match(appData, /SUPABASE_SERVICE_KEY/);
   assert.match(appData, /validateSignedSession/);
 
   const directTables = [...frontend.matchAll(/supabase\s*\.from\('([^']+)'\)/g)].map(match => match[1]);
-  assert.deepEqual(directTables, ['lims_bill_cache', 'lims_bill_cache', 'lims_bill_cache']);
+  assert.deepEqual(directTables, []);
   assert.equal(fs.readdirSync(path.join(root, 'api')).filter(file => file.endsWith('.js')).length, 12);
 });

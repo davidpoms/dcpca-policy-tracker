@@ -229,7 +229,7 @@ test('activity and team list actions use exact fixed read contracts and generic 
   } finally { global.fetch = originalFetch; }
 });
 
-test('frontend read boundary preserves mappings and leaves only lims_bill_cache direct reads', () => {
+test('frontend read boundary preserves mappings and leaves no direct table reads', () => {
   const app = read('frontend/app.jsx');
   const bootstrap = app.match(/const loadFromSupabase = async \(\) => \{([\s\S]*?)\n            \};/)[1];
   const activity = app.match(/const loadActivityLog = async \(\) => \{([\s\S]*?)\n            \};/)[1];
@@ -261,12 +261,10 @@ test('frontend read boundary preserves mappings and leaves only lims_bill_cache 
   assert.ok(updateBlock.indexOf('setItems(items.map') < updateBlock.indexOf('await refreshTeamMembers()'));
   assert.ok(updateBlock.indexOf('await refreshTeamMembers()') < updateBlock.indexOf('setEditingTeamMember(null)'));
   const directTables = [...app.matchAll(/supabase\s*\.from\('([^']+)'\)/g)].map(match => match[1]);
-  assert.deepEqual([...new Set(directTables)], ['lims_bill_cache']);
-  assert.equal(directTables.length, 3);
+  assert.deepEqual(directTables, []);
   assert.match(app, /initializeSupabase[\s\S]*?fetch\('\/api\/client-config'\)/);
-  assert.match(app, /\.ilike\('committees', `%\$\{committee\}%`\)/);
-  assert.match(app, /\.ilike\('introduced_by', `%\$\{sponsor\}%`\)/);
-  assert.match(app, /\.ilike\('co_introducers', `%\$\{sponsor\}%`\)/);
+  assert.match(app, /action: 'limsCache\.committee\.search'/);
+  assert.match(app, /action: 'limsCache\.sponsor\.search'/);
   const apiCount = fs.readdirSync(path.join(root, 'api')).filter(file => file.endsWith('.js')).length;
   assert.equal(apiCount, 12);
 });

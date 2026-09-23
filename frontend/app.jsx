@@ -620,13 +620,14 @@
                     if ((searchMode === 'all' || searchMode === 'committees') && trackedCommittees.length > 0) {
                         for (const committee of trackedCommittees) {
                             try {
-                                const { data, error } = await supabase
-                                    .from('lims_bill_cache')
-                                    .select('*')
-                                    .eq('council_period_id', selectedPeriod.councilPeriodId)
-                                    .ilike('committees', `%${committee}%`);
-                                if (error) throw error;
-                                allResults.push((data || []).map(row => ({
+                                const response = await window.DCPCAFrontend.appDataRequest({
+                                    action: 'limsCache.committee.search',
+                                    councilPeriodId: selectedPeriod.councilPeriodId,
+                                    committee
+                                });
+                                if (!response.ok) throw new Error('Failed to search committee cache');
+                                const { rows } = await response.json();
+                                allResults.push((rows || []).map(row => ({
                                     legislationNumber: row.bill_number,
                                     title: row.title,
                                     category: row.category,
@@ -637,32 +638,22 @@
                                     introductionDate: row.introduction_date,
                                     shortDescription: row.title
                                 })));
-                                console.log(`[committee search] "${committee}" → ${(data || []).length} matches from cache`);
+                                console.log(`[committee search] "${committee}" → ${(rows || []).length} matches from cache`);
                             } catch (err) { console.error(`Error searching committee "${committee}":`, err); allResults.push([]); }
                         }
                     }
                     if ((searchMode === 'all' || searchMode === 'sponsors') && trackedSponsors.length > 0) {
-                        // Query the lims_bill_cache table in Supabase — populated nightly by build-bill-cache cron
+                        // Query the lims_bill_cache data populated nightly by build-bill-cache cron
                         for (const sponsor of trackedSponsors) {
                             try {
-                                // Search introduced_by and co_introducers columns
-                                const [byIntroducer, byCo] = await Promise.all([
-                                    supabase.from('lims_bill_cache')
-                                        .select('*')
-                                        .eq('council_period_id', selectedPeriod.councilPeriodId)
-                                        .ilike('introduced_by', `%${sponsor}%`),
-                                    supabase.from('lims_bill_cache')
-                                        .select('*')
-                                        .eq('council_period_id', selectedPeriod.councilPeriodId)
-                                        .ilike('co_introducers', `%${sponsor}%`)
-                                ]);
-                                const seen = new Set();
-                                const matches = [];
-                                [...(byIntroducer.data || []), ...(byCo.data || [])].forEach(row => {
-                                    if (!seen.has(row.bill_number)) {
-                                        seen.add(row.bill_number);
-                                        // Shape to match LIMS search result format
-                                        matches.push({
+                                const response = await window.DCPCAFrontend.appDataRequest({
+                                    action: 'limsCache.sponsor.search',
+                                    councilPeriodId: selectedPeriod.councilPeriodId,
+                                    sponsor
+                                });
+                                if (!response.ok) throw new Error('Failed to search sponsor cache');
+                                const { rows } = await response.json();
+                                const matches = (rows || []).map(row => ({
                                             legislationNumber: row.bill_number,
                                             title: row.title,
                                             category: row.category,
@@ -672,9 +663,7 @@
                                             referredToCommittees: row.committees,
                                             introductionDate: row.introduction_date,
                                             shortDescription: row.title
-                                        });
-                                    }
-                                });
+                                }));
                                 console.log(`[sponsor search] "${sponsor}" → ${matches.length} matches from cache`);
                                 allResults.push(matches);
                             } catch (err) {

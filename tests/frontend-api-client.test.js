@@ -137,7 +137,7 @@ test('all LIMS proxy callers retain their own failure and continuation behavior'
 test('all app-data callers use the transport and the classic script loads before Babel', () => {
   assert.match(page, /<script src="frontend\/lims-hearings\.js"><\/script>\s*<script src="frontend\/api-client\.js"><\/script>\s*<script type="text\/babel" src="frontend\/app\.jsx"><\/script>/);
   assert.doesNotMatch(html, /fetch\(['"]\/api\/app-data['"]/);
-  assert.equal((html.match(/window\.DCPCAFrontend\.appDataRequest\(/g) || []).length, 31);
+  assert.equal((html.match(/window\.DCPCAFrontend\.appDataRequest\(/g) || []).length, 33);
   for (const name of [
     'checkHearingsForTrackedItems', 'checkHearingForItem', 'toggleSelection',
     'updateAssignment', 'updatePriority', 'updateActionStatus', 'updateItemActivity',
