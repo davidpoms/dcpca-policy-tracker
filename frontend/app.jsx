@@ -257,6 +257,7 @@
             const [councilPeriods, setCouncilPeriods] = useState([]);
             const [selectedPeriod, setSelectedPeriod] = useState(null);
             const [loading, setLoading] = useState(false);
+            const [bootstrapLoading, setBootstrapLoading] = useState(true);
             const [error, setError] = useState(null);
             const [showAddKeyword, setShowAddKeyword] = useState(false);
             const [showAddCommittee, setShowAddCommittee] = useState(false);
@@ -404,6 +405,8 @@
                 } catch (err) {
                     console.error('Error loading from Supabase:', err);
                     setError('Failed to load data: ' + err.message);
+                } finally {
+                    setBootstrapLoading(false);
                 }
             };
 
@@ -1428,7 +1431,7 @@
                                     <button onClick={() => { setShowActivityLog(true); loadActivityLog(); }} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700">📋 Activity Log</button>
                                     <button onClick={() => setShowManualEntry(true)} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">+ Add DC Register</button>
                                     <button onClick={exportToCSV} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">Export CSV</button>
-                                    <button onClick={refreshData} disabled={loading} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-400">{loading ? 'Loading...' : 'Refresh'}</button>
+                                    <button onClick={refreshData} disabled={loading || bootstrapLoading} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-400">{loading ? 'Loading...' : 'Refresh'}</button>
                                 </div>
                             </div>
 

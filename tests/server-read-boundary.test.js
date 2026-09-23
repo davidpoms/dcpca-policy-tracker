@@ -241,6 +241,7 @@ test('frontend read boundary preserves mappings and leaves only lims_bill_cache 
   assert.match(bootstrap, /setItemNotes\(notesMap\)/);
   assert.match(bootstrap, /setStatusHistory\(histMap\)/);
   assert.match(bootstrap, /if \(!response\.ok\) throw new Error/);
+  assert.match(bootstrap, /finally \{\s*setBootstrapLoading\(false\);\s*\}/);
   assert.ok(bootstrap.indexOf('setStatusHistory(histMap)') < bootstrap.indexOf('if (!response.ok) throw new Error'));
   assert.match(bootstrap, /hasDataset\('trackedAgencies'\) && bootstrap\.trackedAgencies/);
   assert.match(bootstrap, /hasDataset\('billStatusHistory'\) && bootstrap\.billStatusHistory/);
