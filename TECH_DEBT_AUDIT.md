@@ -1,427 +1,223 @@
-# Technical Debt Audit: DC Policy Tracker
-
-## Verified current state
-
-The following checks were verified against the current branch state rather than assuming historical findings are still open:
-
-- Protected cron endpoints require an exact bearer secret check against `process.env.CRON_SECRET`; there is no remaining `x-vercel-cron` acceptance path in the current code.
-- The browser login flow validates `APP_PASSWORD` and stores `{ token, expires }` in `sessionStorage` from [api/check-password.js](api/check-password.js) and [index.html](index.html).
-- That opaque token is not validated server-side anywhere in the current branch; the session is not used to authorize Supabase queries or to gate database operations.
-- Browser database access is still handled through the Supabase anon/publishable key and the RLS policies in [rls-migration.sql](rls-migration.sql).
-- The initial migration defect around `activity_log` is already fixed in [migration.sql](migration.sql); the remaining issue is migration discipline and verifying schema history across environments.
-- Browser configuration is no longer hardcoded; the frontend fetches `/api/client-config` and initializes Supabase from that response in [index.html](index.html).
-- The cache builder now uses `process.env.VERCEL_URL` to call its own deployment, not a hardcoded production URL in [api/build-bill-cache.js](api/build-bill-cache.js).
-
----
-
-## 1. Architecture and data flow
-
-### Finding 1.1 — Single-file frontend remains a maintainability risk
-- Status: OPEN
-- Severity: High
-- Relevant files: [index.html](index.html), [README.md](README.md)
-- Why it matters: The app still runs as one large React/Babel script with business logic, parsing, filters, data loading, and UI rendering all mixed together. This increases review risk and makes feature changes fragile.
-- Smallest reasonable remediation: Extract stable helpers and page sections into a few modules, without changing behavior.
-- Regression tests that should exist before changing it: render smoke test for authenticated dashboard, a login flow smoke test, and filter logic tests.
-
-### Finding 1.2 — LIMS parsing and status-transition logic is duplicated between client and server code
-- Status: PARTIALLY RESOLVED
-- Severity: Medium
-- Relevant files: [index.html](index.html), [api/check-hearings.js](api/check-hearings.js), [api/send-daily-report.js](api/send-daily-report.js)
-- Why it matters: The same concepts — latest activity detection, hearing extraction, and status comparison — still exist in both browser and server code, which creates drift risk. The duplication is smaller than before in the current branch, but it remains.
-- Smallest reasonable remediation: Move shared parsing logic into a minimal utility layer and reuse it in both contexts.
-- Regression tests that should exist before changing it: fixture-based LIMS payload tests for hearing and activity extraction.
-
----
-
-## 2. Frontend structure and maintainability
-
-### Finding 2.1 — `index.html` is still an application file, not a light static shell
-- Status: OPEN
-- Severity: High
-- Relevant files: [index.html](index.html)
-- Why it matters: The file is large, hand-written, and heavily nested. That is not a correctness bug by itself, but it makes change, review, and test coverage much harder.
-- Smallest reasonable remediation: Minimal extraction of data and rendering helper functions while keeping the current UI shape intact.
-- Regression tests that should exist before changing it: login screen test, dashboard load test, and a test for data fetch failure rendering.
-
-### Finding 2.2 — Email generation templates remain hand-assembled HTML in multiple files
-- Status: OPEN
-- Severity: Medium
-- Relevant files: [api/send-daily-report.js](api/send-daily-report.js), [api/send-eod-report.js](api/send-eod-report.js), [api/send-weekly-report.js](api/send-weekly-report.js), [api/check-hearings.js](api/check-hearings.js)
-- Why it matters: The report HTML is large and repeated, which increases the odds of inconsistent formatting or logic changes across job types.
-- Smallest reasonable remediation: Centralize shared formatting helpers and a minimal email layout helper.
-- Regression tests that should exist before changing it: snapshot tests for representative daily and weekly HTML emails.
-
----
-
-## 3. Authentication and authorization boundaries
-
-### Finding 3.1 — Password gate is a client-side UX gate, not a true server-authorized database session
-- Status: OPEN
-- Severity: Critical
-- Relevant files: [api/check-password.js](api/check-password.js), [index.html](index.html), [rls-migration.sql](rls-migration.sql)
-- Why it matters: The current flow validates `APP_PASSWORD` and returns a random opaque token with expiry in `sessionStorage`. There is no server-side validation path for that token in the current codebase. The browser then talks directly to Supabase using the publishable key and RLS rules. In other words, the shared-password login is not used as the database authorization boundary; it only gates the UI. This is an important distinction.
-- Smallest reasonable remediation: Keep the current login UX for now, but document the boundary clearly and add server-side session validation if the login is intended to authorize more than the UI. If database access must be protected by a true session, it needs a server-issued auth flow rather than a browser-only token.
-- Regression tests that should exist before changing it: valid-password login, expired-token handling, invalid token rejection, and a test that browser-only auth does not pretend to authorize database access.
-
-### Finding 3.2 — Protected cron endpoints now require only the exact bearer secret
-- Status: RESOLVED
-- Severity: Critical
-- Relevant files: [api/build-bill-cache.js](api/build-bill-cache.js), [api/check-hearings.js](api/check-hearings.js), [api/send-daily-report.js](api/send-daily-report.js), [api/send-eod-report.js](api/send-eod-report.js), [api/send-weekly-report.js](api/send-weekly-report.js)
-- Why it matters: The current code checks `req.headers['authorization'] === \'Bearer ${CRON_SECRET}\'` and does not accept `x-vercel-cron` or any other alternative. This is the expected security model for manual cron calls.
-- Smallest reasonable remediation: Keep this requirement as-is and consider a shared auth helper to avoid future copy/paste drift.
-- Regression tests that should exist before changing it: valid bearer test, missing header rejection, wrong scheme rejection, and spoofed `x-vercel-cron` rejection.
-
-### Finding 3.3 — The browser session is not validated against a server-side session store
-- Status: NEEDS VERIFICATION
-- Severity: High
-- Relevant files: [api/check-password.js](api/check-password.js), [index.html](index.html)
-- Why it matters: The current code stores the token in `sessionStorage`, but there is no server-side session verification route or server-side token lookup. This means the app is relying on a client-only token for UX gating and not for database authorization.
-- Smallest reasonable remediation: If this is meant to be a real access control mechanism, add server-side validation or move to a proper auth flow. If it is only UI gating, document it clearly and avoid implying it secures Supabase access.
-- Regression tests that should exist before changing it: tests covering malformed session payloads, expiration, and that the UI does not grant data access without an authenticated client state.
-
----
-
-## 4. Supabase/RLS security model
-
-### Finding 4.1 — Browser anon policies remain broad enough to permit significant direct access from a leaked publishable key
-- Status: OPEN
-- Severity: Critical
-- Relevant files: [rls-migration.sql](rls-migration.sql)
-- Why it matters: The current RLS model grants anonymous clients SELECT/INSERT/UPDATE/DELETE access to a large set of tables: `tracked_items`, `item_notes`, `bill_status_history`, `tracked_keywords`, `tracked_committees`, `tracked_sponsors`, `tracked_agencies`, `team_members`, `activity_log`, and `lims_bill_cache` read access. A caller with the browser publishable key can perform those operations if the application allows it, subject to the table policies. The browser login is not a database auth boundary; the anon key is.
-- Smallest reasonable remediation: Reduce anon permissions to the minimum required for the product’s actual browser workflow, and move sensitive writes to server-side endpoints where possible.
-- Regression tests that should exist before changing it: RLS policy tests covering read/write limits for anon users and verifying that server-only tables remain inaccessible.
-- Current branch note: The first authenticated API slice in [api/app-data.js](api/app-data.js) now covers the low-risk config-table writes (`tracked_keywords`, `tracked_committees`, `tracked_sponsors`, and `tracked_agencies`) behind a server-side session check, but anonymous direct Supabase writes remain possible until the next RLS phase and the rest of the browser mutation surface is migrated.
-
-### Finding 4.2 — There are no foreign-key constraints on history/log rows
-- Status: OPEN
-- Severity: Medium
-- Relevant files: [migration.sql](migration.sql), [rls-migration.sql](rls-migration.sql)
-- Why it matters: The schema still allows `bill_status_history.item_id` and `activity_log.item_id` to be orphaned or inconsistent with `tracked_items.id` because the schema does not enforce a foreign key relationship.
-- Smallest reasonable remediation: Add foreign keys or a server-side validation layer so history rows cannot point to missing items.
-- Regression tests that should exist before changing it: attempt to insert invalid item IDs and assert rejection or cleanup.
-
-### Finding 4.3 — The earlier fresh-install `activity_log` gap is already fixed in the current branch
-- Status: RESOLVED
-- Severity: High
-- Relevant files: [migration.sql](migration.sql), [rls-migration.sql](rls-migration.sql)
-- Why it matters: `activity_log` is present in the current `migration.sql` and is enabled in [rls-migration.sql](rls-migration.sql). That specific defect is no longer open on this branch. The remaining issue is not that the table is absent, but that there is still no formal migration history or environment validation process.
-- Smallest reasonable remediation: Add a migration framework or schema check script to avoid future drift, while keeping the current table in place.
-- Regression tests that should exist before changing it: an idempotent migration test verifying table presence in a clean database and a schema-coverage test for required tables.
-
----
-
-## 5. Database schema/migration consistency
-
-### Finding 5.1 — Migration discipline remains weak despite the `activity_log` fix
-- Status: OPEN
-- Severity: High
-- Relevant files: [migration.sql](migration.sql), [rls-migration.sql](rls-migration.sql), [README.md](README.md)
-- Why it matters: The project still relies on manually run SQL files rather than versioned schema migrations. This is a risk even though the current branch includes the `activity_log` table.
-- Smallest reasonable remediation: Add a versioned migration directory and a schema validation script for each environment.
-- Regression tests that should exist before changing it: schema drift test and a fresh install verification run.
-
-### Finding 5.2 — Schema and RLS policy changes are still not enforced at deploy time
-- Status: OPEN
-- Severity: Medium
-- Relevant files: [migration.sql](migration.sql), [rls-migration.sql](rls-migration.sql)
-- Why it matters: The app can be deployed without an explicit check that the required tables and policies exist in the target Supabase project.
-- Smallest reasonable remediation: Add a startup or deployment validation script that checks for required schema objects and fails loudly when they are missing.
-- Regression tests that should exist before changing it: migration validation tests in CI and a preflight check on deployment.
-
----
-
-## 6. LIMS integration and caching
-
-### Finding 6.1 — Council period remains a hardcoded operational constant
-- Status: OPEN
-- Severity: Medium
-- Relevant files: [api/build-bill-cache.js](api/build-bill-cache.js), [README.md](README.md), [index.html](index.html)
-- Why it matters: `COUNCIL_PERIOD = 26` is still hardcoded in the cache builder and is part of the operational model. This is not an immediate security bug, but it is a correctness and maintenance risk during council transitions.
-- Smallest reasonable remediation: Move council period to config and validate it at startup.
-- Regression tests that should exist before changing it: a config validation test for council period and a test that fails when mismatch is present.
-
-### Finding 6.2 — LIMS parsing logic remains duplicated across client and server code
-- Status: PARTIALLY RESOLVED
-- Severity: Medium
-- Relevant files: [index.html](index.html), [api/check-hearings.js](api/check-hearings.js), [api/build-bill-cache.js](api/build-bill-cache.js)
-- Why it matters: The pattern is still duplicated, though the app has already improved some of the logic. It remains a risk for drift between browser-visible and cron-generated data.
-- Smallest reasonable remediation: Consolidate shared parsing logic in a utility module.
-- Regression tests that should exist before changing it: fixture-based parsing tests covering multiple LIMS response variants.
-
-### Finding 6.3 — Cache freshness is still not protected by a clear health check
-- Status: OPEN
-- Severity: Medium
-- Relevant files: [api/build-bill-cache.js](api/build-bill-cache.js)
-- Why it matters: The cache build remains operationally important but there is no strong health signal for stale or partial data beyond logs.
-- Smallest reasonable remediation: Add a cache-health endpoint or a startup check that validates coverage and `cached_at` freshness.
-- Regression tests that should exist before changing it: a partial-cache detection test and a stale-cache warning test.
-
----
-
-## 7. Cron scheduling and timezone correctness
-
-### Finding 7.1 — Timezone assumptions are still split between comments and actual runtime calculations
-- Status: OPEN
-- Severity: Medium
-- Relevant files: [vercel.json](vercel.json), [README.md](README.md), [api/check-hearings.js](api/check-hearings.js), [api/send-daily-report.js](api/send-daily-report.js), [api/send-eod-report.js](api/send-eod-report.js), [api/send-weekly-report.js](api/send-weekly-report.js)
-- Why it matters: The code and comments talk in ET terms while the Vercel cron schedule is defined in UTC. This still creates a maintenance risk even if the current branch is functionally operational.
-- Smallest reasonable remediation: Centralize timezone logic and document the actual schedule conversion in one place.
-- Regression tests that should exist before changing it: tests for ET-to-UTC conversion and schedule validation for the intended windows.
-
----
-
-## 8. Email/report architecture
-
-### Finding 8.1 — Email provider stack remains inconsistent and partially mixed
-- Status: PARTIALLY RESOLVED
-- Severity: High
-- Relevant files: [lib/mailer.js](lib/mailer.js), [api/check-hearings.js](api/check-hearings.js), [api/send-daily-report.js](api/send-daily-report.js), [api/send-weekly-report.js](api/send-weekly-report.js), [README.md](README.md)
-- Why it matters: There is a Microsoft Graph mailer, but [api/check-hearings.js](api/check-hearings.js) still uses Gmail SMTP and the README still documents a mixed stack in places. That is a real operational and maintenance risk.
-- Smallest reasonable remediation: Standardize on one mail provider and one sender config path.
-- Regression tests that should exist before changing it: provider smoke tests and config-validation tests for each email route.
-
-### Finding 8.2 — Mail config validation is not fully consistent across routes
-- Status: OPEN
-- Severity: Medium
-- Relevant files: [lib/mailer.js](lib/mailer.js), [api/check-hearings.js](api/check-hearings.js), [api/send-daily-report.js](api/send-daily-report.js), [api/send-eod-report.js](api/send-eod-report.js), [api/send-weekly-report.js](api/send-weekly-report.js)
-- Why it matters: Some routes fail early; some warn and continue. This still hides operational failures and makes delivery reliability harder to understand.
-- Smallest reasonable remediation: Add a single mail-config validation helper and fail clearly when required env vars are absent.
-- Regression tests that should exist before changing it: tests for missing config and provider failure responses.
-
----
-
-## 9. Duplicated code
-
-### Finding 9.1 — Repeated boilerplate remains across protected routes
-- Status: OPEN
-- Severity: Medium
-- Relevant files: [api/build-bill-cache.js](api/build-bill-cache.js), [api/check-hearings.js](api/check-hearings.js), [api/send-daily-report.js](api/send-daily-report.js), [api/send-eod-report.js](api/send-eod-report.js), [api/send-weekly-report.js](api/send-weekly-report.js)
-- Why it matters: The authorization check and Supabase helper pattern are repeated across handlers. This is not unusual for small serverless code, but it is a maintenance risk and can drift if one route is changed without the others.
-- Smallest reasonable remediation: Introduce a common helper for bearer-header validation and shared Supabase access logic.
-- Regression tests that should exist before changing it: table-driven auth tests across all cron handlers.
-
-### Finding 9.2 — Browser and server logic still duplicate LIMS-specific logic
-- Status: PARTIALLY RESOLVED
-- Severity: Medium
-- Relevant files: [index.html](index.html), [api/check-hearings.js](api/check-hearings.js)
-- Why it matters: The logic still exists in more than one place, even though the branch improved some of it. Shared behavior should be extracted when risk is clear.
-- Smallest reasonable remediation: Build a small shared parsing module.
-- Regression tests that should exist before changing it: parser fixture tests.
-
----
-
-## 10. Hardcoded configuration
-
-### Finding 10.1 — Browser hardcoded production Supabase configuration is resolved
-- Status: RESOLVED
-- Severity: High
-- Relevant files: [index.html](index.html), [api/client-config.js](api/client-config.js)
-- Why it matters: The current frontend fetches `/api/client-config` and initializes Supabase from environment-backed config rather than static production values.
-- Smallest reasonable remediation: Keep this pattern and add config validation to fail clearly when values are absent.
-- Regression tests that should exist before changing it: a test that missing config returns a clear error and prevents client initialization.
-
-### Finding 10.2 — build-bill-cache no longer calls a hardcoded production deployment
-- Status: RESOLVED
-- Severity: High
-- Relevant files: [api/build-bill-cache.js](api/build-bill-cache.js)
-- Why it matters: It now uses `process.env.VERCEL_URL` and a same-deployment proxy URL, which is the correct Preview-isolated pattern.
-- Smallest reasonable remediation: Keep this model and add a startup validation that fails if `VERCEL_URL` is missing.
-- Regression tests that should exist before changing it: config validation tests for the deployment URL path.
-
-### Finding 10.3 — Some operational examples still contain production-like URLs in comments and sample docs
-- Status: PARTIALLY RESOLVED
-- Severity: Low
-- Relevant files: [README.md](README.md), the removed one-time backfill route
-- Why it matters: The app is better than it was historically, but examples and docs still contain deployment-style URLs and secret placeholders that can be copied under pressure.
-- Smallest reasonable remediation: Standardize examples on generic placeholders and remove stale production examples where possible.
-- Regression tests that should exist before changing it: repo-scanning checks for forbidden patterns and explicit production domains.
-
----
-
-## 11. Dead/temporary/obsolete code
-
-### Finding 11.1 — The one-time backfill utility still exists in the repo
-- Status: PARTIALLY RESOLVED
-- Severity: Medium
-- Relevant files: the removed one-time backfill route, [README.md](README.md)
-- Why it matters: The code still exists and is still deployed as part of the route set. The project documentation still says it should be removed after use, and there is no evidence it was deleted from the current branch. That is operational debt and an unnecessary route surface.
-- Smallest reasonable remediation: Remove it if no longer needed or gate it to local-only use with a clear “do not deploy” annotation.
-- Regression tests that should exist before changing it: a deploy guard that fails if one-off scripts remain in the default route set.
-
-### Finding 11.2 — Test mail helper has been removed from the deployable route set
-- Status: RESOLVED
-- Severity: Low
-- Relevant files: [lib/mailer.js](lib/mailer.js), [README.md](README.md)
-- Why it matters: A one-off smoke test route was a legacy dev utility and was not part of the production workflow. Keeping it in the route set consumes a Vercel function slot without adding runtime value.
-- Smallest reasonable remediation: Keep the mail helper in /lib and remove the route entirely from deployable functions.
-- Regression tests that should exist before changing it: route-set validation ensuring only intended production handlers remain in /api.
-
----
-
-## 12. Error handling and observability
-
-### Finding 12.1 — Error handling remains inconsistent across cron handlers
-- Status: OPEN
-- Severity: High
-- Relevant files: [api/check-hearings.js](api/check-hearings.js), [api/send-daily-report.js](api/send-daily-report.js), [api/send-eod-report.js](api/send-eod-report.js), [api/send-weekly-report.js](api/send-weekly-report.js)
-- Why it matters: Some routes return clear JSON errors and others log and continue. That inconsistency makes production debugging slower and hides provider failures.
-- Smallest reasonable remediation: Standardize an error contract and log format across the route handlers.
-- Regression tests that should exist before changing it: error-path tests for missing config and downstream provider failures.
-
-### Finding 12.2 — Logs are still ad hoc and not structured
-- Status: OPEN
-- Severity: Medium
-- Relevant files: [api/*.js](api)
-- Why it matters: Without consistent logging, it is harder to correlate a failed send or cache build with a specific request or environment state.
-- Smallest reasonable remediation: Add a basic request ID and structured log helper.
-- Regression tests that should exist before changing it: log-format tests for success and failure cases.
-
----
-
-## 13. Testing gaps
-
-### Finding 13.1 — There is still no meaningful automated tests for auth, LIMS parsing, or cron routes
-- Status: OPEN
-- Severity: Critical
-- Relevant files: [package.json](package.json), [api/*.js](api), [index.html](index.html)
-- Why it matters: The branch improvement reduced some obvious risk, but the application still has no real automated guard rails for auth behavior, cron security, schema assumptions, or parsing logic.
-- Smallest reasonable remediation: Add a minimal test harness using the project’s existing runtime. Do not redesign the app; just add auth and parser tests first.
-- Regression tests that should exist before changing it: route auth tests, parser tests, and a login dashboard smoke test.
-
-### Finding 13.2 — The repo still lacks a CI safety check for secret leakage and production-domain leakage
-- Status: OPEN
-- Severity: High
-- Relevant files: [package.json](package.json), [README.md](README.md)
-- Why it matters: A scanning or lint step would catch the exact class of issue that caused the earlier secret exposure and preview/prod misconfiguration.
-- Smallest reasonable remediation: Add a CI-level grep or secret-scan job to block suspicious patterns before deploy.
-- Regression tests that should exist before changing it: a repository scan test that fails when a production URL or secret-like value is added accidentally.
-
----
-
-## 14. Documentation/code discrepancies
-
-### Finding 14.1 — The README is more current than some of the operational comments, but still not fully authoritative
-- Status: PARTIALLY RESOLVED
-- Severity: Medium
-- Relevant files: [README.md](README.md), [api/*.js](api), [vercel.json](vercel.json)
-- Why it matters: The README is improved, but some runtime comments still describe older assumptions and the project still lacks a single definitive source of truth for setup and deployment behavior.
-- Smallest reasonable remediation: Keep the README as the current reference and add a short “source of truth” note or a deployment checklist script.
-- Regression tests that should exist before changing it: a docs drift review in release checks.
-
----
-
-## 15. Dependency/build-tooling issues
-
-### Finding 15.1 — There is still no real build-validation harness beyond manual inspection
-- Status: OPEN
-- Severity: Medium
-- Relevant files: [package.json](package.json), [index.html](index.html), [api/*.js](api)
-- Why it matters: The app is small but still has no formal lint/test/build command. This is a risk even without a rewrite.
-- Smallest reasonable remediation: Add a minimal `npm test` script and a syntax-health command to establish a baseline without changing runtime behavior.
-- Regression tests that should exist before changing it: a CI command that runs auth/parser tests and validates syntax.
-
-### Finding 15.2 — The current browser runtime still relies on Babel/React CDN loading and inline scripting
-- Status: OPEN
-- Severity: Medium
-- Relevant files: [index.html](index.html), [vercel.json](vercel.json)
-- Why it matters: This is not a current immediate failure, but it remains a valuable target for a later hardening pass to reduce runtime complexity and CSP exposure.
-- Smallest reasonable remediation: Keep the current app stable but add a backlog item to move to a simpler static asset pipeline when feasible.
-- Regression tests that should exist before changing it: startup smoke test for the page boot path.
-
----
-
-## 16. Performance/scalability concerns
-
-### Finding 16.1 — The report and hearing jobs still perform large, repeated data fetches and HTML rendering passes
-- Status: OPEN
-- Severity: Medium
-- Relevant files: [api/check-hearings.js](api/check-hearings.js), [api/send-daily-report.js](api/send-daily-report.js), [api/send-eod-report.js](api/send-eod-report.js), [api/send-weekly-report.js](api/send-weekly-report.js)
-- Why it matters: The app can scale for current volume, but as tracked items and history grow, the job volume can become slower and more expensive.
-- Smallest reasonable remediation: Batch fetches and measure representative runtime before schedule changes or data volume growth.
-- Regression tests that should exist before changing it: performance smoke tests under representative sample sizes.
-
-### Finding 16.2 — Cache freshness still lacks explicit health validation
-- Status: OPEN
-- Severity: Medium
-- Relevant files: [api/build-bill-cache.js](api/build-bill-cache.js)
-- Why it matters: The search/cache system still assumes a healthy cursor and full coverage without a dedicated health signal.
-- Smallest reasonable remediation: Add a cache-health check and fail clearly when the cache is stale or incomplete.
-- Regression tests that should exist before changing it: partial-cache and stale-cache tests.
-
----
-
-## 17. Accessibility and UX issues
-
-### Finding 17.1 — The app remains visually rich but not strongly accessibility-tested
-- Status: OPEN
-- Severity: Medium
-- Relevant files: [index.html](index.html)
-- Why it matters: It relies on custom inline styles and complex interactive panels without an accessibility test harness.
-- Smallest reasonable remediation: Add a basic accessibility review and keyboard/focus checks around the login and dashboard interactions.
-- Regression tests that should exist before changing it: keyboard navigation and focus-order tests.
-
-### Finding 17.2 — Error states are still limited in the browser UI
-- Status: PARTIALLY RESOLVED
-- Severity: Medium
-- Relevant files: [index.html](index.html)
-- Why it matters: The current frontend does display explicit login errors and a config failure message in initialization, which is an improvement. It still lacks a fuller user-visible error contract for stale data or failed load states.
-- Smallest reasonable remediation: Add a standard “configuration failed / try again later” state and more explicit data-load failure messaging.
-- Regression tests that should exist before changing it: UI tests for bad config and load failure states.
-
----
-
-## 18. Feature opportunities that fit the existing product
-
-### Opportunity 18.1 — Add an operational health view
-- Status: OPEN
-- Severity: Low
-- Relevant files: [index.html](index.html), [api/*.js](api)
-- Why it matters: The app already tracks status, cache, and reports; a health view would reduce operational uncertainty and help support a shared internal workflow.
-- Smallest reasonable remediation: Add summary values for last successful cron run and last cache refresh.
-- Regression tests that should exist before changing it: status-value tests for success and failure flows.
-
-### Opportunity 18.2 — Add config validation and startup safety checks
-- Status: PARTIALLY RESOLVED
-- Severity: Low
-- Relevant files: [api/client-config.js](api/client-config.js), [index.html](index.html), [README.md](README.md)
-- Why it matters: This is partly addressed through `/api/client-config`, but there is still room for broader startup validation and more deterministic failure states.
-- Smallest reasonable remediation: Add a preflight validation for required environment config and stale council period assumptions.
-- Regression tests that should exist before changing it: config validation tests for missing env vars and successful startup path.
-
----
-
-## Recommended Execution Order
-
-1. Regression tests / CI needed before risky security changes
-   - Add auth tests for bearer-secret routes and login/session behavior.
-   - Add RLS and config validation tests.
-   - Add secret-leak and production-domain scanning checks in CI.
-
-2. Authentication and database authorization
-   - Reconcile the shared-password login with the actual database auth boundary.
-   - Tighten RLS for anon access where possible.
-   - Clarify whether the session token is only a UI gate or a true server-authorized session.
-
-3. Email-stack consolidation and dead-code removal
-   - Standardize on one provider and one sender config path.
-   - Remove or localize one-off scripts such as the backfill utility and test mail route.
-
-4. Migration discipline
-   - Adopt a migration or schema-check process even without a large framework.
-   - Keep `activity_log` in the canonical migration and validate schema consistency across environments.
-
-5. Frontend modularization
-   - Extract stable helper logic and render patterns without changing the current user experience.
-   - Keep the existing app intact while making review and test coverage easier.
-
-6. Feature improvements
-   - Add health/ops views, config warnings, and workflow enhancements after security and test gaps are covered.
-
----
-
-## Bottom line
-
-The current branch is materially improved compared with the historical state: it no longer hardcodes production browser Supabase config, it no longer accepts `x-vercel-cron` as an auth mechanism, and it includes the missing `activity_log` table in [migration.sql](migration.sql). However, the app still has a major conceptual gap: the front-end login is not the same as a database auth boundary. The browser still accesses Supabase through the publishable key and RLS, and the shared-password session is not used to authorize server/database actions. That distinction should remain explicit in documentation and release review.
-
-The next priority is not a rewrite. It is a disciplined sequence of security and validation work: test coverage first, then auth/RLS boundary clarity, then provider cleanup and migration discipline, and only then broader maintainability or feature work.
+# DCPCA Policy Tracker — Technical Debt Audit
+
+Audit date: 2026-09-22
+Base commit: `bb6009c`
+
+## Executive Summary
+
+Phase 2 closed the most urgent integrity gap: the browser no longer writes application tables directly. Signed, HttpOnly sessions gate explicit `/api/app-data` actions, and canonical RLS now permits anonymous reads only. Phase 3 also separated the browser LIMS helpers and the page shell from the application entry.
+
+The remaining work is primarily architecture and operations, with two material boundary gaps. The Supabase publishable client can still anonymously read every tracker table the UI loads, including notes, assignments, team email addresses, history, and activity. Separately, `/api/hello` is a CORS-enabled proxy that accepts a caller-controlled LIMS API path, method, and POST body. It fixes the host but does not constrain the LIMS operation or require the staff session.
+
+Council Period 27 is the nearest product risk. Interactive LIMS search is period-selectable, but the cache builder and cron keyword search are hard-coded to 26. Tracked B26/PR26 records do not have a separate council-period field and should remain independently trackable; changing active discovery must not become a bulk data migration or a filter that hides historical work.
+
+The redesign should establish explicit lifecycle and queue concepts before its navigation becomes durable. Current `action_status` is simultaneously a workflow status, a report segment, and an alert eligibility rule, while urgency is inferred independently from activity, hearing, deadline, priority, and assignment fields.
+
+## Resolved Since Prior Audit
+
+- **Signed session boundary for mutations.** `lib/session.js` signs an expiring HMAC cookie and makes it HttpOnly and SameSite=Strict; `/api/app-data` validates it before accepting POSTs (`lib/session.js:20-87`, `api/app-data.js:39-49`, `api/app-data.js:135-175`).
+- **Browser table writes migrated.** `frontend/app.jsx` uses the explicit app-data transport for mutation paths, while `api/app-data.js` has a fixed 27-action allowlist and exact request-key validation (`frontend/api-client.js:3-11`, `api/app-data.js:3-36`).
+- **Anonymous write policies tightened in canonical RLS.** `rls-migration.sql` drops anonymous and legacy public write policies for application tables and recreates read policies only (for example `rls-migration.sql:14-25`, `29-40`, `44-50`).
+- **Hearing persistence schema reconciliation.** `tracked_items.hearing_checked_at` is canonical `timestamptz` (`migration.sql:29-45`) and has an additive versioned migration.
+- **Activity timestamps repaired.** `activity_log.created_at` is canonical `timestamptz` (`migration.sql:166-173`), with a UTC-preserving versioned conversion and New York display handling in the UI.
+- **Browser LIMS helpers have explicit boundaries.** Normalization, activity/timeline, and browser hearing selection are separate same-origin classic scripts; `index.html` is now a shell and `frontend/app.jsx` is the Babel entry. Characterization tests intentionally protect browser versus cron differences (`PHASE3_LIMS_CHARACTERIZATION.md:3-15`).
+
+## Current Findings
+
+### SEC-01 — Anonymous read policies expose the complete internal tracker dataset
+
+- **Severity:** High — security risk / redesign prerequisite
+- **Area:** Data-access boundary
+- **Evidence:** The browser initializes a Supabase client from a public configuration endpoint and directly selects `tracked_items`, `item_notes`, tracking criteria, `team_members`, `bill_status_history`, `activity_log`, and `lims_bill_cache` (`api/client-config.js:1-13`, `frontend/app.jsx:304-420`, `frontend/app.jsx:613-646`). Canonical RLS grants `TO anon USING (true)` reads on those tables, including notes and team members (`rls-migration.sql:25`, `40`, `49`, `65`, `79`, `93`, `107`, `121`, `135`, `149`, `164`).
+- **Why it matters:** Anyone with the public Supabase URL/key can read staff notes, assignment, activity/history, tracking criteria, and team email addresses without passing the password screen. The write boundary is fixed, but the password screen is not a confidentiality boundary for these reads.
+- **Recommended direction:** Introduce session-gated server read endpoints or a real user identity/RLS model, then remove browser access to staff-only tables. Define which discovery/cache data may remain public before exposing it.
+- **Blocks redesign:** Yes, before a richer Work Queue or assignment workflow increases sensitive content.
+- **Before Council 27:** Recommended; it is not mechanically required for rollover.
+
+### SEC-02 — `/api/hello` is an unauthenticated, caller-parameterized LIMS proxy
+
+- **Severity:** High — security and operational risk
+- **Area:** Server API boundary
+- **Evidence:** The route enables `Access-Control-Allow-Origin: *`, accepts `endpoint`, `method`, and `body` from POST or query parameters, concatenates the endpoint onto the LIMS PublicData base URL, and forwards it with `LIMS_API_KEY` (`api/hello.js:1-57`). It has no signed-session or endpoint/method allowlist check. Browser callers use it for council periods, search, and detail reads (`frontend/api-client.js:13-31`, `frontend/app.jsx:423-443`, `590-784`).
+- **Why it matters:** The fixed LIMS hostname prevents generic SSRF, but any Internet caller can consume the credentialed LIMS proxy and invoke any LIMS PublicData operation the key permits. This can exhaust quota, make abuse hard to attribute, and exposes upstream error bodies through the route (`api/hello.js:59-80`).
+- **Recommended direction:** Define the actual browser operations, then make the route session-gated and enforce a narrow path/method/body schema per operation. Preserve caller-specific response semantics behind a small server contract instead of retaining a generic proxy.
+- **Blocks redesign:** Yes; Discover will increase traffic and add sources.
+- **Before Council 27:** Yes, especially if cache/search traffic rises.
+
+### CP-01 — Active discovery and keyword monitoring are hard-coded to Council 26
+
+- **Severity:** High — current rollover blocker
+- **Area:** Council-period handling / operations
+- **Evidence:** `api/build-bill-cache.js` fixes `COUNCIL_PERIOD = 26`, generates only `B26-`/`PR26-` identifiers, and stores its cursor under 26 (`api/build-bill-cache.js:25-32`, `106-142`, `207-212`). `api/check-hearings.js` also fixes `COUNCIL_PERIOD = 26` for keyword `SearchLegislation` (`api/check-hearings.js:19-26`, `400-413`). README rollover instructions still describe manual source edits (`README.md:259-270`).
+- **Why it matters:** Interactive search can select a period, but scheduled discovery will continue finding only Council 26 items after rollover. Cache freshness and keyword alerts will silently diverge from the UI.
+- **Recommended direction:** Establish one configuration source for the *active discovery period*, its bill/resolution namespaces and ranges, and make cache/cursor/keyword jobs consume it. Retain period-specific cache rows and cursors during transition.
+- **Blocks redesign:** Yes, for a Discover experience that promises current candidates.
+- **Before Council 27:** Yes.
+
+### CP-02 — Tracked-item lifecycle is not distinct from the active discovery period
+
+- **Severity:** High — redesign prerequisite / Council 27 design blocker
+- **Area:** Domain model
+- **Evidence:** `tracked_items` has `bill_number` but no council-period, lifecycle, archived-at, closed-at, or source-record identity columns (`migration.sql:7-45`). The UI merges LIMS results with tracked records by ID and preserves tracking fields (`frontend/app.jsx:690-708`, `755-770`); untracking physically deletes the record (`api/app-data.js:715-733`).
+- **Why it matters:** B26/PR26 items need to remain monitored while active discovery moves to 27. Today that distinction is implicit in identifier strings and an `action_completed` label, which cannot represent retained historical, closed, ignored, or archived records safely.
+- **Recommended direction:** Define lifecycle states and retention rules separately from a current-period setting. Decide whether all source types carry a normalized period, and whether archive is a lifecycle transition rather than deletion.
+- **Blocks redesign:** Yes.
+- **Before Council 27:** The design decision is required; implementation should precede navigation that filters by period or archive.
+
+### OPS-01 — Scheduled work has no run ledger, overlap control, retry policy, or failure notification
+
+- **Severity:** High — operational risk
+- **Area:** Crons and reliability
+- **Evidence:** Five schedules run from `vercel.json:2-22`, including hearings at 13:00 UTC and a daily report at 13:30 UTC. Jobs authenticate with repeated bearer comparisons, fetch external services without AbortController deadlines, and rely on console output/HTTP response handling (`api/check-hearings.js:37-74`, `api/build-bill-cache.js:43-84`, `api/send-daily-report.js:21-30`). Hearing checks catch errors per item and continue (`api/check-hearings.js:184-272`); cache builds advance a shared cursor after a batch (`api/build-bill-cache.js:113-214`). No table records a run start, finish, partial failure, notification outcome, or last known-good cache.
+- **Why it matters:** A slow or overlapping hearing run can collide with reporting, duplicated manual invocations can race the cursor, and operators cannot distinguish a quiet day from a failed job. Retry after a partial run can resend emails because report delivery has no idempotency record.
+- **Recommended direction:** Add a minimal server-side job-run/lease model, bounded upstream timeouts, structured summaries, and an alert on terminal failure/staleness. Confirm schedule-count and duration behavior against the actual Vercel plan before depending on the cadence.
+- **Blocks redesign:** Not initially, but blocks dependable queue and alert promises.
+- **Before Council 27:** Yes for cache/keyword job observability; the rest can follow in small slices.
+
+### OPS-02 — Email delivery uses two active transports and duplicated report composition
+
+- **Severity:** Medium — operational and maintainability debt
+- **Area:** Email/reporting
+- **Evidence:** `check-hearings.js` imports Nodemailer and sends Gmail SMTP alerts (`api/check-hearings.js:17`, `145-164`, `345-389`, `476-481`). Daily, EOD, and weekly reports import the Microsoft Graph mailer (`api/send-daily-report.js:14`, `api/send-eod-report.js:8`, `api/send-weekly-report.js:15`, `lib/mailer.js:1-47`). Each report constructs its own HTML and recipient/config handling. `package.json` declares no dependencies or lockfile, despite the Nodemailer import.
+- **Why it matters:** Credentials, failure behavior, sender identity, and delivery observability differ by job. The undeclared Nodemailer dependency is a deployment reproducibility risk. Reports also encode the current action-status taxonomy directly.
+- **Recommended direction:** Choose and document one delivery provider, make dependencies reproducible, centralize transport and recipient policy, then factor common report primitives only after the new lifecycle/queue definitions exist.
+- **Blocks redesign:** Should be addressed during redesign, before changing report semantics.
+- **Before Council 27:** Fix dependency reproducibility and document the active sender; full consolidation can wait.
+
+### DATA-01 — History, audit, and assignment relationships can drift or orphan
+
+- **Severity:** Medium — data integrity risk
+- **Area:** Schema
+- **Evidence:** `item_notes.item_id` correctly references `tracked_items` with cascade (`migration.sql:54-61`), but `bill_status_history.item_id` and `activity_log.item_id` have no foreign key (`65-75`, `166-179`). `tracked_items.assigned_to` is free text rather than a team-member identity (`migration.sql:22`, `79-84`); the team rename action compensates by patching rows by old name (`api/app-data.js:886-929`).
+- **Why it matters:** Deleted/untracked items can leave history and audit rows whose relationship cannot be verified. Renames and duplicate-like names make assignment reporting fragile. A future Archive should retain an intentional audit relation, not depend on accidental orphaning.
+- **Recommended direction:** Define retention and attribution semantics first. Then add identifiers/foreign keys or explicit nullable historical references through additive, backfilled migrations; do not cascade-delete audit history by default.
+- **Blocks redesign:** Yes for Archive and accountable assignments.
+- **Before Council 27:** Design now; migration can accompany lifecycle work.
+
+### DATA-02 — Workflow, urgency, and source facts are overloaded into nullable fields and duplicated flags
+
+- **Severity:** Medium — redesign prerequisite
+- **Area:** Workflow/status model
+- **Evidence:** `tracked_items` defaults `action_status` to `action_needed`, priority to `medium`, assignment to `Unassigned`, and stores independent activity/hearing/deadline fields (`migration.sql:22-45`). UI filters and controls hard-code the three action-status values (`frontend/app.jsx:1209-1212`, `1387-1392`, `1817-1829`, `2075-2088`). Alert eligibility and reports also filter `action_needed`/`monitor_and_assess` (`api/check-hearings.js:214-249`; report handlers).
+- **Why it matters:** “Action Needed” is used as a persistent disposition and a near-term queue signal, while priority, hearing, deadline, `has_new_activity`, and last activity supply competing urgency signals. Reports and alerts will change unintentionally if labels are renamed without an adapter period.
+- **Recommended direction:** Define immutable source facts, persistent lifecycle/workflow state, ownership, and derived urgency separately. Keep compatibility mapping for old status values in APIs, filters, email, and history during transition.
+- **Blocks redesign:** Yes.
+- **Before Council 27:** The semantic contract should be decided first; a safe migration may follow rollover.
+
+### LIMS-01 — Latest-activity extraction is duplicated; hearing differences are intentionally distinct
+
+- **Severity:** Medium — maintainability debt
+- **Area:** LIMS integration
+- **Evidence:** Browser `extractLatestActivityDate` in `frontend/lims-activity.js:3-56` and cron `extractLatestActivityDate` in `api/check-hearings.js:88-124` collect the same ordered candidate sources and labels but return different shapes. Browser and cron hearing selection remain different by design: browser returns earliest future or latest past and supports more fallbacks, while cron returns only a future committee hearing/markup (`frontend/lims-hearings.js`; `api/check-hearings.js:126-140`). Characterization tests explicitly preserve both contracts.
+- **Why it matters:** Identical activity logic can drift through maintenance. Conversely, unifying hearing logic would change browser UI or alert semantics.
+- **Recommended direction:** Extract only characterization-proven candidate collection into a server/browser-compatible pure artifact once the zero-build loading contract is chosen. Keep hearing selection separate unless product semantics change intentionally.
+- **Blocks redesign:** No.
+- **Before Council 27:** Safe to defer.
+
+### FE-01 — `DCPolicyTracker` remains a single high-coupling feature controller
+
+- **Severity:** Medium — redesign prerequisite
+- **Area:** Frontend architecture
+- **Evidence:** `frontend/app.jsx` is 2,182 lines. `DCPolicyTracker` owns roughly 67 state values/setters, data loading, Supabase reads, LIMS search, hearing progress, all mutations, export/email preview, filters, and most presentation (`frontend/app.jsx:229-1350`, `1394-2182`). Only `HearingReportPanel` and `ActivityLogModal` are presentation components (`111-227`).
+- **Why it matters:** New Work Queue, Tracked, Discover, and Archive views will otherwise share a large mutable `items` collection and handlers coupling source search, tracking, selection, and UI panels. Small visual extractions alone do not solve this.
+- **Recommended direction:** Establish domain data seams first: tracker repository/read model, discovery result model, lifecycle actions, and queue derivation. Then extract feature sections that consume explicit props while state remains in the controller, one CI/Preview slice at a time.
+- **Blocks redesign:** Yes.
+- **Before Council 27:** Start the data seam, but UI component migration can be staged.
+
+### FE-02 — Browser direct reads and source-sliced tests constrain the next frontend boundary
+
+- **Severity:** Medium — maintainability debt
+- **Area:** Frontend/testing
+- **Evidence:** The browser directly calls Supabase for its read model (`frontend/app.jsx:304-420`, `613-646`), while tests evaluate or source-slice the classic scripts and Babel entry (`tests/browser-lims-normalization.test.js`, `tests/lims-characterization.test.js`, `tests/security-regressions.test.js`). `index.html` intentionally uses CDN React, Babel, Tailwind, Supabase, and classic scripts before `frontend/app.jsx`.
+- **Why it matters:** Moving reads server-side or splitting presentation changes both the data contract and static-test locations. The zero-build arrangement is viable, but global script order and browser/server helper compatibility must remain explicit.
+- **Recommended direction:** Keep pure browser helpers as classic scripts for now. When extracting a read client, add contract tests at the new boundary and update source-location guards rather than weakening them.
+- **Blocks redesign:** Yes, paired with SEC-01.
+- **Before Council 27:** Not by itself.
+
+### DOC-01 — README and AUTH/RLS plan materially contradict the deployed architecture
+
+- **Severity:** Medium — operational/documentation debt
+- **Area:** Documentation drift
+- **Evidence:** README says the frontend is entirely `index.html`, documents Gmail/Resend and a pending Graph migration, and says anon browser access remains unchanged (`README.md:25-45`, `126-144`). `AUTH_RLS_PLAN.md` still describes sessionStorage, browser writes, and anon INSERT/UPDATE/DELETE policies (`AUTH_RLS_PLAN.md:5-19`, `50-175`). Current code uses an HttpOnly signed cookie, app-data mutations, Graph for reports, and canonical read-only anon policies.
+- **Why it matters:** An operator following these docs can configure the wrong mail stack, make an incorrect RLS change, or misunderstand the production security boundary.
+- **Recommended direction:** Replace these documents with a concise current deployment/access runbook after deciding the read-boundary target. Keep Phase 2/3 maps as implementation records, not operational truth.
+- **Blocks redesign:** No, but should be corrected before handoff or broader staff use.
+- **Before Council 27:** Yes for rollover and mail/runbook instructions.
+
+### LEG-01 — The repository still contains an obsolete, unsafe DCRegs prototype route
+
+- **Severity:** Medium — security/maintenance debt
+- **Area:** Dead or obsolete code
+- **Evidence:** `api/scrape-dcregs.js` is publicly CORS-enabled, reads a caller-supplied `limit`, requires ScrapingBee, constructs a URL containing its API key, and is not scheduled or called by the current frontend (`api/scrape-dcregs.js:1-42`; `vercel.json:2-22`; `frontend/app.jsx`). The separately proven DCRegs feasibility work is explicitly on another spike branch and should not be merged implicitly.
+- **Why it matters:** This route conflicts with the validated direction (direct Vercel access, no ScrapingBee requirement), can consume paid proxy traffic, and is outside the current session/auth posture.
+- **Recommended direction:** Remove or disable the legacy route in its own security-reviewed slice. Design production DCRegs ingestion from the spike’s bounded, authenticated, read-only lessons rather than reviving this prototype.
+- **Blocks redesign:** No, but it should not survive into a Discover launch.
+- **Before Council 27:** Recommended if the deployment exposes it.
+
+## Council Period 27 Readiness
+
+**Must complete before active discovery rolls over**
+
+1. Replace the hard-coded 26 configuration in cache building and cron keyword search with a controlled active-period source; carry bill/resolution range policy with it.
+2. Prove a transition run: build/use the 27 cache while retaining the 26 cache and cursor, then verify keyword alerts search 27.
+3. Decide lifecycle/archive handling so B26/PR26 items remain visible and monitored independently of selected discovery period.
+4. Update the runbook, including current UTC schedules, manual cache recovery, credentials, and exact 27 activation steps.
+5. Add job-run visibility/alerting for cache freshness and failed keyword discovery.
+
+**Verified as already period-ready**
+
+- Browser search loads available periods from LIMS and passes the selected ID to LIMS/cache queries (`frontend/app.jsx:423-431`, `590-646`, `729-784`).
+- Hearing checks load all tracked non-manual items by their existing bill number, so they do not need B26 records deleted or reassigned to continue monitoring (`api/check-hearings.js:173-185`).
+
+## Redesign Preconditions
+
+### Must address before redesign
+
+1. Close the read confidentiality gap (SEC-01) and constrain/authenticate the LIMS proxy (SEC-02).
+2. Define the lifecycle, archive, and active-discovery-period contract (CP-01, CP-02, DATA-02).
+3. Establish a tracker read model/API boundary so new views do not depend on anonymous raw-table reads (SEC-01, FE-02).
+4. Decide history/audit retention and stable assignment identity before Archive and ownership views (DATA-01).
+5. Add minimum job health/lease observability before Work Queue relies on automated updates (OPS-01).
+
+### Should address during redesign
+
+- Replace overloaded action-status vocabulary through a backward-compatible adapter in filters, history, alerts, and reports.
+- Split `DCPolicyTracker` along data-domain seams, then move presentation sections with small prop contracts.
+- Consolidate mail transport/configuration and rebuild reports around lifecycle and urgency.
+- Specify discovery candidate provenance, Track/Ignore decisions, and future DCRegs source boundaries.
+
+### Safe to defer
+
+- Sharing latest-activity helper mechanics once browser/server loading is deliberately designed.
+- Further classic-script/component extraction that does not establish a useful domain boundary.
+- UI cleanup not required by the Work Queue/Tracked/Discover/Archive contract.
+
+## Suggested Implementation Sequence
+
+1. **Security boundary:** session-gate and narrow `/api/hello`; add server read contracts for staff data; test anonymous direct reads are denied after the corresponding RLS migration. Deploy Preview first.
+2. **Council rollover:** introduce one active-period configuration and controlled 26→27 cache/keyword transition; add run status and cache freshness diagnostics; validate Preview with both periods retained.
+3. **Domain contract:** write and test lifecycle, archive, urgency, ownership, and discovery-candidate invariants. Add no UI redesign until the compatibility mapping for current `action_status` is explicit.
+4. **Data migration:** add lifecycle/period/identity fields additively, backfill B26/PR26, and preserve history/audit retention. Preview validation must include existing manual and LIMS items.
+5. **Read-model/frontend:** create explicit Work Queue, Tracked, Discover, and Archive read models; migrate one feature section at a time from `DCPolicyTracker` without altering queue semantics.
+6. **Automation/reporting:** lease/record cron runs, add bounded retries/timeouts and failure notification, then consolidate email transport and redesign report templates.
+7. **DCRegs production design:** separately convert the feasibility spike into an authenticated, bounded ingestion design after deciding candidate provenance and notice-text requirements. Do not merge the spike wholesale.
+
+Each slice should remain branch → CI → Preview → merge, with production rollout only after targeted data, RLS, and cron checks pass.
+
+## Items Investigated but Not Considered Current Debt
+
+- **Browser direct writes:** none found outside `/api/app-data`; existing static guards cover migrated tracked-item and activity-log paths.
+- **Anonymous write policies:** no canonical anon/public INSERT, UPDATE, or DELETE policy remains for browser tables examined. This does not resolve anonymous read exposure.
+- **Signed mutation session:** the cookie is signed, HttpOnly, SameSite=Strict, short-lived, and verified server-side. This audit found no regression in that mechanism.
+- **Browser versus cron hearing selection:** differences are intentional and characterized. Cron selects only a future committee hearing/markup, whereas browser preserves richer display/fallback behavior. Do not unify them by name alone.
+- **DCRegs feasibility:** the successful direct-fetch/issue-enumeration spike is future architecture evidence only. It is not part of this branch’s production design.
+- **`activity_log.created_at` timezone:** canonical schema and versioned migration now use `timestamptz`; the UI safely renders legacy UTC wall-clock values in `America/New_York`.
+
+## Finding Count
+
+| Severity | Count |
+| --- | ---: |
+| Critical | 0 |
+| High | 5 |
+| Medium | 8 |
+| Low | 0 |
