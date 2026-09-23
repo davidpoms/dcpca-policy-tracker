@@ -4,7 +4,7 @@
 --
 -- What this does:
 --   - Enables RLS on every table the app uses
---   - Grants the anon key (used in the browser) exactly the operations each table needs
+--   - Keeps internal tracker tables server-only; the service role bypasses RLS
 --   - Server-side-only tables (lims_cache_cursor, keyword_alert_log) get no anon access
 --   - lims_bill_cache is read-only from the browser
 --   - The service role key (used in API functions) bypasses RLS and retains full access
@@ -22,8 +22,6 @@ DROP POLICY IF EXISTS "Allow public insert" ON tracked_items;
 DROP POLICY IF EXISTS "Allow public update" ON tracked_items;
 DROP POLICY IF EXISTS "Allow public delete" ON tracked_items;
 
-CREATE POLICY "anon can read tracked_items"   ON tracked_items FOR SELECT TO anon USING (true);
-
 -- ─── item_notes ───────────────────────────────────────────────────────────────
 
 ALTER TABLE item_notes ENABLE ROW LEVEL SECURITY;
@@ -37,8 +35,6 @@ DROP POLICY IF EXISTS "Allow public insert" ON item_notes;
 DROP POLICY IF EXISTS "Allow public update" ON item_notes;
 DROP POLICY IF EXISTS "Allow public delete" ON item_notes;
 
-CREATE POLICY "anon can read item_notes"   ON item_notes FOR SELECT TO anon USING (true);
-
 -- ─── bill_status_history ──────────────────────────────────────────────────────
 
 ALTER TABLE bill_status_history ENABLE ROW LEVEL SECURITY;
@@ -46,7 +42,6 @@ ALTER TABLE bill_status_history ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "anon can read bill_status_history"   ON bill_status_history;
 DROP POLICY IF EXISTS "anon can insert bill_status_history" ON bill_status_history;
 
-CREATE POLICY "anon can read bill_status_history"   ON bill_status_history FOR SELECT TO anon USING (true);
 -- History writes use server-side service-role access only.
 
 -- ─── team_members ─────────────────────────────────────────────────────────────
@@ -62,8 +57,6 @@ DROP POLICY IF EXISTS "Allow public insert" ON team_members;
 DROP POLICY IF EXISTS "Allow public update" ON team_members;
 DROP POLICY IF EXISTS "Allow public delete" ON team_members;
 
-CREATE POLICY "anon can read team_members"   ON team_members FOR SELECT TO anon USING (true);
-
 -- ─── tracked_keywords ─────────────────────────────────────────────────────────
 
 ALTER TABLE tracked_keywords ENABLE ROW LEVEL SECURITY;
@@ -75,8 +68,6 @@ DROP POLICY IF EXISTS "anon can delete tracked_keywords" ON tracked_keywords;
 DROP POLICY IF EXISTS "Allow public read access" ON tracked_keywords;
 DROP POLICY IF EXISTS "Allow public insert" ON tracked_keywords;
 DROP POLICY IF EXISTS "Allow public delete" ON tracked_keywords;
-
-CREATE POLICY "anon can read tracked_keywords"   ON tracked_keywords FOR SELECT TO anon USING (true);
 
 -- ─── tracked_committees ───────────────────────────────────────────────────────
 
@@ -90,8 +81,6 @@ DROP POLICY IF EXISTS "Allow public read access" ON tracked_committees;
 DROP POLICY IF EXISTS "Allow public insert" ON tracked_committees;
 DROP POLICY IF EXISTS "Allow public delete" ON tracked_committees;
 
-CREATE POLICY "anon can read tracked_committees"   ON tracked_committees FOR SELECT TO anon USING (true);
-
 -- ─── tracked_sponsors ─────────────────────────────────────────────────────────
 
 ALTER TABLE tracked_sponsors ENABLE ROW LEVEL SECURITY;
@@ -104,8 +93,6 @@ DROP POLICY IF EXISTS "Allow public read access" ON tracked_sponsors;
 DROP POLICY IF EXISTS "Allow public insert" ON tracked_sponsors;
 DROP POLICY IF EXISTS "Allow public delete" ON tracked_sponsors;
 
-CREATE POLICY "anon can read tracked_sponsors"   ON tracked_sponsors FOR SELECT TO anon USING (true);
-
 -- ─── tracked_agencies ─────────────────────────────────────────────────────────
 
 ALTER TABLE tracked_agencies ENABLE ROW LEVEL SECURITY;
@@ -117,8 +104,6 @@ DROP POLICY IF EXISTS "anon can delete tracked_agencies" ON tracked_agencies;
 DROP POLICY IF EXISTS "Allow public read access" ON tracked_agencies;
 DROP POLICY IF EXISTS "Allow public insert" ON tracked_agencies;
 DROP POLICY IF EXISTS "Allow public delete" ON tracked_agencies;
-
-CREATE POLICY "anon can read tracked_agencies"   ON tracked_agencies FOR SELECT TO anon USING (true);
 
 -- ─── lims_bill_cache ──────────────────────────────────────────────────────────
 -- Read-only from the browser; writes happen only via server-side cron
@@ -137,8 +122,6 @@ DROP POLICY IF EXISTS "anon can read activity_log"   ON activity_log;
 DROP POLICY IF EXISTS "anon can insert activity_log" ON activity_log;
 DROP POLICY IF EXISTS "Allow public read access" ON activity_log;
 DROP POLICY IF EXISTS "Allow public insert" ON activity_log;
-
-CREATE POLICY "anon can read activity_log"   ON activity_log FOR SELECT TO anon USING (true);
 
 -- ─── keyword_alert_log ────────────────────────────────────────────────────────
 -- Server-side only — no anon access

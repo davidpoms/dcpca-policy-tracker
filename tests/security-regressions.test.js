@@ -955,7 +955,7 @@ test('repository guardrails block historical secret drift and keep the app-data 
   }
 });
 
-test('config-table RLS keeps anon reads and removes anon writes', () => {
+test('config-table historical RLS migration removes anon writes while canonical RLS removes reads too', () => {
   const tables = [
     'tracked_keywords',
     'tracked_committees',
@@ -1003,7 +1003,7 @@ test('config-table RLS keeps anon reads and removes anon writes', () => {
   assert.deepEqual([...actionBlock[1].matchAll(/'([^']+)'/g)].map((match) => match[1]), expectedActions);
 
   for (const table of tables) {
-    assert.match(canonicalRls, new RegExp(`CREATE POLICY "anon can read ${table}"\\s+ON ${table} FOR SELECT TO anon`));
+    assert.doesNotMatch(canonicalRls, new RegExp(`CREATE POLICY "anon can read ${table}"\\s+ON ${table} FOR SELECT TO anon`));
     assert.doesNotMatch(canonicalRls, new RegExp(`CREATE POLICY "anon can (?:insert|update|delete) ${table}"`));
     assert.doesNotMatch(canonicalRls, new RegExp(`CREATE POLICY "Allow public (?:read access|insert|delete)"\\s+ON ${table}`));
 
@@ -1019,17 +1019,19 @@ test('config-table RLS keeps anon reads and removes anon writes', () => {
   }
 });
 
-test('bill-status history RLS keeps anon SELECT and removes browser write policies', () => {
+test('bill-status history historical migration retains its old read policy while canonical RLS removes it', () => {
   const canonical = readRepoText('rls-migration.sql');
   const migration = readRepoText('migrations/2026-09-21-tighten-bill-status-history-rls.sql');
   const writePolicy = /CREATE POLICY\s+"[^"]*"\s+ON bill_status_history\s+FOR (?:INSERT|UPDATE|DELETE)\b/i;
   const readPolicy = /CREATE POLICY\s+"anon can read bill_status_history"\s+ON bill_status_history\s+FOR SELECT TO anon USING \(true\)/;
-  for (const sql of [canonical, migration]) {
-    assert.match(sql, /ALTER TABLE bill_status_history ENABLE ROW LEVEL SECURITY/);
-    assert.match(sql, /DROP POLICY IF EXISTS "anon can insert bill_status_history"\s+ON bill_status_history/);
-    assert.match(sql, readPolicy);
-    assert.doesNotMatch(sql, writePolicy);
-  }
+  assert.match(canonical, /ALTER TABLE bill_status_history ENABLE ROW LEVEL SECURITY/);
+  assert.match(canonical, /DROP POLICY IF EXISTS "anon can insert bill_status_history"\s+ON bill_status_history/);
+  assert.doesNotMatch(canonical, readPolicy);
+  assert.doesNotMatch(canonical, writePolicy);
+  assert.match(migration, /ALTER TABLE bill_status_history ENABLE ROW LEVEL SECURITY/);
+  assert.match(migration, /DROP POLICY IF EXISTS "anon can insert bill_status_history"\s+ON bill_status_history/);
+  assert.match(migration, readPolicy);
+  assert.doesNotMatch(migration, writePolicy);
   assert.match(migration, /DROP POLICY IF EXISTS "anon can read bill_status_history"\s+ON bill_status_history/);
 
   const appData = readRepoText('api/app-data.js');
@@ -1039,24 +1041,21 @@ test('bill-status history RLS keeps anon SELECT and removes browser write polici
   assert.doesNotMatch(readRepoText('frontend/app.jsx'), /\.from\('bill_status_history'\)\s*\.\s*insert\s*\(/);
 });
 
-test('tracked_items and activity_log RLS allow only anon reads after browser writes migrate', () => {
+test('tracked_items and activity_log historical migration retains old reads while canonical RLS removes them', () => {
   const canonical = readRepoText('rls-migration.sql');
   const versioned = readRepoText('migrations/2026-09-21-tighten-tracked-items-activity-log-rls.sql');
   assert.match(versioned, /BEGIN;[\s\S]*COMMIT;/);
-  for (const sql of [canonical, versioned]) {
-    for (const table of ['tracked_items', 'activity_log']) {
-      assert.match(sql, new RegExp(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY;`));
-      assert.match(sql, new RegExp(`CREATE POLICY "anon can read ${table}"\\s+ON ${table} FOR SELECT TO anon USING \\(true\\);`));
-      const tablePolicies = [...sql.matchAll(new RegExp(`CREATE POLICY "([^"]+)"\\s+ON ${table}\\s+FOR (\\w+)`, 'gi'))];
-      assert.deepEqual(tablePolicies.map(([, name, command]) => [name, command.toUpperCase()]),
-        [[`anon can read ${table}`, 'SELECT']]);
+  for (const table of ['tracked_items', 'activity_log']) {
+      assert.match(canonical, new RegExp(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY;`));
+      assert.doesNotMatch(canonical, new RegExp(`CREATE POLICY "anon can read ${table}"\\s+ON ${table} FOR SELECT TO anon`));
+      assert.match(versioned, new RegExp(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY;`));
+      assert.match(versioned, new RegExp(`CREATE POLICY "anon can read ${table}"\\s+ON ${table} FOR SELECT TO anon USING \\(true\\);`));
       for (const policy of ['Allow public read access', 'Allow public insert',
         ...(table === 'tracked_items' ? ['Allow public update', 'Allow public delete'] : []),
         `anon can read ${table}`, `anon can insert ${table}`,
         ...(table === 'tracked_items' ? [`anon can update ${table}`, `anon can delete ${table}`] : [])]) {
         assert.match(versioned, new RegExp(`DROP POLICY IF EXISTS "${policy}" ON ${table};`));
       }
-    }
   }
   const creates = [...versioned.matchAll(/CREATE POLICY "([^"]+)"\s+ON (tracked_items|activity_log)/g)]
     .map(([, name, table]) => `${table}:${name}`);
@@ -1076,7 +1075,7 @@ test('tracked_items and activity_log RLS allow only anon reads after browser wri
   assert.match(readRepoText('api/check-hearings.js'), /await sbPatch\('tracked_items', item\.id/);
 });
 
-test('item_notes RLS migration keeps anon reads and removes anon/public writes', () => {
+test('item_notes historical migration retains its old read policy while canonical RLS removes it', () => {
   const canonicalRls = readRepoText('rls-migration.sql');
   const versionedMigration = readRepoText('migrations/2026-09-18-tighten-item-notes-rls.sql');
 
@@ -1089,7 +1088,7 @@ test('item_notes RLS migration keeps anon reads and removes anon/public writes',
   assert.match(canonicalRls, /DROP POLICY IF EXISTS "Allow public insert"\s+ON item_notes;/);
   assert.match(canonicalRls, /DROP POLICY IF EXISTS "Allow public update"\s+ON item_notes;/);
   assert.match(canonicalRls, /DROP POLICY IF EXISTS "Allow public delete"\s+ON item_notes;/);
-  assert.match(canonicalRls, /CREATE POLICY "anon can read item_notes"\s+ON item_notes FOR SELECT TO anon USING \(true\);/);
+  assert.doesNotMatch(canonicalRls, /CREATE POLICY "anon can read item_notes"\s+ON item_notes FOR SELECT TO anon USING \(true\);/);
   assert.doesNotMatch(canonicalRls, /CREATE POLICY "anon can (?:upsert|insert|update|delete) item_notes"/);
   assert.doesNotMatch(canonicalRls, /CREATE POLICY "Allow public (?:read access|insert|update|delete)"\s+ON item_notes/);
 
@@ -1124,7 +1123,7 @@ test('team_members email reconciliation is additive and leaves IDs, RLS, and add
   assert.doesNotMatch(versionedMigration, /added_at/i);
 });
 
-test('team_members RLS migrations keep only anon SELECT access', () => {
+test('team_members historical migration retains its old read policy while canonical RLS removes it', () => {
   const canonicalRls = readRepoText('rls-migration.sql');
   const versionedMigration = readRepoText('migrations/2026-09-21-tighten-team-members-rls.sql');
 
@@ -1135,10 +1134,11 @@ test('team_members RLS migrations keep only anon SELECT access', () => {
     assert.match(source, /DROP POLICY IF EXISTS "Allow public insert" ON team_members;/);
     assert.match(source, /DROP POLICY IF EXISTS "Allow public read access" ON team_members;/);
     assert.match(source, /DROP POLICY IF EXISTS "Allow public update" ON team_members;/);
-    assert.match(source, /CREATE POLICY "anon can read team_members"\s+ON team_members\s+FOR SELECT\s+TO anon\s+USING \(true\);/);
     assert.doesNotMatch(source, /CREATE POLICY "anon can (?:insert|update|delete) team_members"/);
     assert.doesNotMatch(source, /CREATE POLICY "Allow public (?:read access|insert|update|delete)"\s+ON team_members/);
   }
+  assert.doesNotMatch(canonicalRls, /CREATE POLICY "anon can read team_members"/);
+  assert.match(versionedMigration, /CREATE POLICY "anon can read team_members"\s+ON team_members\s+FOR SELECT\s+TO anon\s+USING \(true\);/);
 });
 
 test('api/app-data.js implements opaque-ID team member mutation contracts', async () => {
