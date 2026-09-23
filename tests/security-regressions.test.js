@@ -601,13 +601,14 @@ test('api/logout.js clears the session cookie', async () => {
 test('browser Supabase client and public configuration endpoint remain removed', () => {
   const browserFiles = [
     'index.html',
-    ...fs.readdirSync(path.join(root, 'frontend'))
+    ...fs.readdirSync(path.join(projectRoot, 'frontend'))
       .filter(file => /\.(?:js|jsx)$/.test(file))
       .map(file => path.join('frontend', file))
   ];
   const browserText = browserFiles.map(readRepoText).join('\n');
-  assert.equal(fs.existsSync(path.join(root, 'api/client-config.js')), false);
+  assert.equal(fs.existsSync(path.join(projectRoot, 'api/client-config.js')), false);
   assert.doesNotMatch(browserText, /window\.supabase|createClient|initializeSupabase|\/api\/client-config|SUPABASE_PUBLISHABLE_KEY|supabase\s*\.from\s*\(/);
+  assert.match(readRepoText('frontend/app.jsx'), /const root = ReactDOM\.createRoot\(document\.getElementById\('root'\)\);\s*root\.render\(<App \/>\);/);
   assert.doesNotMatch(readRepoText('index.html'), /supabase-js|cdn\.jsdelivr\.net/i);
   const csp = readRepoText('vercel.json');
   assert.doesNotMatch(csp, /\*\.supabase\.co|cdn\.jsdelivr\.net/i);
