@@ -30,4 +30,6 @@ URL-bearing HTML attributes are entity-decoded before URL parsing and allowlist 
 
 Fetched target-issue and category pages include bounded structural diagnostics and raw-signal integer counts. Each page reports at most ten sanitized notice-related element candidates; raw HTML, onclick code, ASP.NET state values, cookies, external URLs, and surrounding snippets are excluded. These diagnostics do not alter notice enumeration or viability rules.
 
+Weekly enumeration recognizes normal allowlisted notice links first. As a narrow fallback, it may extract only an exact `NoticeDetail.aspx?NoticeId=N<digits>` substring from decoded anchor attributes, require consistency with an exact visible N-number, and construct the canonical DCRegs detail URL itself. It does not interpret or execute the surrounding JavaScript, and it does not fetch individual notice pages during enumeration.
+
 This spike does **not** establish that ingestion is viable unless the September 18, 2026 issue is positively identified, a target issue or descended category page is fetched, and at least one notice is enumerated from that target chain. Generic browse-page notices and successful parsing of the two known individual notices do not count. No production workflow, tracked item, candidate record, report, schedule, or database table is created or modified.

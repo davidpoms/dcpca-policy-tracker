@@ -147,6 +147,61 @@ test('category page diagnostics count raw signals and sanitize bounded candidate
   assert.doesNotMatch(json, /<a|onclick|__doPostBack|state-secret|validation-secret|cookie-secret|evil\.test/i);
 });
 
+test('notice enumeration extracts only exact embedded NoticeDetail targets', () => {
+  const base = 'https://www.dcregs.dc.gov/Common/DCR/Issues/IssueCategoryList.aspx?CategoryID=16&IssueID=1209';
+  const live = `<a id="MainContent_rpt_NonRuleMakingList_lnkNotice_0" href="javascript:show('../NoticeDetail.aspx?NoticeId=N146539')">N146539</a>`;
+  assert.deepEqual(route.noticeLinks(live, base), [{
+    noticeId: 'N146539', title: 'N146539', category: null, agency: null,
+    detailUrl: 'https://dcregs.dc.gov/Common/NoticeDetail.aspx?NoticeId=N146539'
+  }]);
+
+  const direct = '<a href="/Common/NoticeDetail.aspx?NoticeId=N146540&amp;source=issue">Direct notice</a>';
+  assert.equal(route.noticeLinks(direct, base)[0].noticeId, 'N146540');
+  assert.equal(new URL(route.noticeLinks(direct, base)[0].detailUrl).searchParams.get('source'), 'issue');
+
+  const rejected = [
+    `<a href="javascript:show('/Common/NoticeDetail.aspx?NoticeId=N146539')">N999999</a>`,
+    '<a href="javascript:alert(1)">N146539</a>',
+    '<a href="javascript:go(\'https://evil.test/x?next=/Common/NoticeDetail.aspx?NoticeId=N146541\')">N999999</a>',
+    '<a href="javascript:show(\'/Common/NoticeDetail.aspx?NoticeId=NABC\')">NABC</a>',
+    '<a href="javascript:show(\'/Common/NoticeDetail.aspx?NoticeId=N146542x\')">N146542x</a>'
+  ].join('');
+  assert.deepEqual(route.noticeLinks(rejected, base), []);
+
+  const externalWrapper = `<a href="javascript:go('https://evil.test/x?next=/Common/NoticeDetail.aspx?NoticeId=N146543')">View Notice</a>`;
+  const safe = route.noticeLinks(externalWrapper, base)[0];
+  assert.equal(safe.noticeId, 'N146543'); assert.equal(new URL(safe.detailUrl).hostname, 'dcregs.dc.gov');
+
+  const duplicate = `${live}<a href="/Common/NoticeDetail.aspx?NoticeId=N146539">N146539</a>`;
+  assert.equal(route.noticeLinks(duplicate, base).length, 1);
+});
+
+test('live-style category anchors enumerate notices only through target issue provenance', async () => {
+  const issueHome = '<html><body><input name="__VIEWSTATE">District of Columbia Register Browse through DCR Issues<a href="/Common/DCR/Issues/IssueDetailPage.aspx?issueID=1209">September 18, 2026</a></body></html>';
+  const issueDetail = '<html><body>District of Columbia Register<a href="IssueCategoryList.aspx?CategoryID=16&amp;IssueID=1209">Notices, Opinions, and Orders</a></body></html>';
+  const liveCategory = `<html><body>District of Columbia Register
+    <a href="javascript:show('../NoticeDetail.aspx?NoticeId=N145956')">N145956</a>
+    <a href="javascript:show('/Common/NoticeDetail.aspx?NoticeId=N146303')">N146303</a></body></html>`;
+  await withEnvFetch({ CRON_SECRET: secret }, standardFetch((url) => {
+    if (url === 'https://www.dcregs.dc.gov/') return response(issueHome, { url });
+    if (url.includes('IssueDetailPage.aspx')) return response(issueDetail, { url });
+    if (url.includes('IssueCategoryList.aspx')) return response(liveCategory, { url });
+    return null;
+  }), async () => {
+    const out = res(); await route.default(request(), out);
+    assert.equal(out.body.issueDiscovery.success, true); assert.equal(out.body.conclusion.issueEnumerationViable, true);
+    assert.equal(out.body.issueDiscovery.noticeCount, 2);
+    assert.deepEqual(out.body.issueDiscovery.sampleNotices.map(item => item.noticeId), ['N145956', 'N146303']);
+    assert.ok(out.body.issueDiscovery.sampleNotices.every(item => item.category === 'Notices, Opinions, and Orders'));
+  });
+
+  const unrelated = '<html><body>District of Columbia Register<a href="javascript:show(\'/Common/NoticeDetail.aspx?NoticeId=N145956\')">N145956</a></body></html>';
+  await withEnvFetch({ CRON_SECRET: secret }, async url => String(url).includes('N146539') ? response(n539) : String(url).includes('N146506') ? response(n506) : response(unrelated), async () => {
+    const out = res(); await route.default(request(), out);
+    assert.equal(out.body.issueDiscovery.success, false); assert.equal(out.body.conclusion.issueEnumerationViable, false);
+  });
+});
+
 test('external form action is reported as rejected and never fetched', async () => {
   const altered = n539.replace('<body>', '<body><form action="https://evil.test/submit">');
   const calls = [];

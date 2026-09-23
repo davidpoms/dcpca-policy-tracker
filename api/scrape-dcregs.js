@@ -531,10 +531,23 @@ function categoryLinks(html, base) {
   for (const a of anchors(html)) if (/(?:CategoryID|CategoryId)=|CategoryNoticeList\.aspx/i.test(a.href)) { const url = allowedDcRegsUrl(a.href, base); if (url) items.push({ url, label: a.text || null }); else rejected++; }
   return { items: unique(items, i => i.url), rejected };
 }
-function noticeLinks(html, base) {
+export function noticeLinks(html, base) {
   const out = [];
-  for (const a of anchors(html)) { const url = allowedDcRegsUrl(a.href, base); const id = url && match(url, /NoticeId=([Nn]\d+)/i)?.toUpperCase(); if (id) out.push({ noticeId: id, title: a.text, category: null, agency: null, detailUrl: url }); }
-  return out;
+  for (const a of anchors(html)) {
+    const directUrl = allowedDcRegsUrl(a.href, base);
+    const directId = directUrl && match(directUrl, /[?&]NoticeId=([Nn]\d+)(?:&|$)/i)?.toUpperCase();
+    if (directId) { out.push({ noticeId: directId, title: a.text, category: null, agency: null, detailUrl: directUrl }); continue; }
+
+    const decodedAttributes = decodeHtmlAttributeValue(a.attrs) || '';
+    const embedded = decodedAttributes.match(/(?:(?:\.\.\/)+|\/Common\/|Common\/)?NoticeDetail\.aspx\?NoticeId=(N\d+)\b/i);
+    if (!embedded) continue;
+    const embeddedId = embedded[1].toUpperCase();
+    const visibleId = /^N\d+$/i.test(a.text.trim()) ? a.text.trim().toUpperCase() : null;
+    if (visibleId && visibleId !== embeddedId) continue;
+    const canonical = allowedDcRegsUrl(`https://dcregs.dc.gov/Common/NoticeDetail.aspx?NoticeId=${embeddedId}`);
+    if (canonical) out.push({ noticeId: embeddedId, title: a.text, category: null, agency: null, detailUrl: canonical });
+  }
+  return unique(out, item => item.noticeId);
 }
 
 export function diagnoseDcregsPage(page, categoryLabel = null) {
