@@ -411,7 +411,7 @@ function boundedCookies(response) {
 async function discoverIssue(home, key, counts) {
   const base = { success: false, issueDate: ISSUE_DATE, issueIdentified: false, issueId: null, targetIssueUrl: null,
     identification: [], browseUrls: [], targetIssueUrls: [], categoryUrls: [], categoryUrlsAccepted: 0, categoryUrlsRejected: 0,
-    targetPagesFetched: 0, noticesFromTargetIssue: 0, categories: [], noticeCount: 0, sampleNotices: [],
+    targetPagesFetched: 0, noticesFromTargetIssue: 0, categories: [], noticeCount: 0, sampleNotices: [], pageDiagnostics: [],
     browseControlCandidates: [], browseControlPageSignals: { hasViewState: false, hasEventValidation: false, hasEventTarget: false },
     browseSubmission: { attempted: false, success: false, status: null, finalUrl: null, structuralValid: false,
       targetIssueCandidateCount: 0, targetIssueIdentified: false, timeoutMs: BROWSE_POST_TIMEOUT_MS,
@@ -442,13 +442,14 @@ async function discoverIssue(home, key, counts) {
   const categoryPages = [];
   for (const category of selectedCategories) { const p = await validatedPage(category.url, key, counts); if (p) categoryPages.push({ ...p, category: category.label }); }
   const notices = unique([...targetPages, ...categoryPages].flatMap(p => noticeLinks(p.body, p.targetUrl).map(n => ({ ...n, category: n.category || p.category || null }))), n => n.noticeId);
+  const pageDiagnostics = [...targetPages, ...categoryPages].map(page => diagnoseDcregsPage(page, page.category || null));
   const success = identified && targetPages.length + categoryPages.length > 0 && notices.length > 0;
   return { ...base, success, issueIdentified: identified, issueId, targetIssueUrl: targetUrls[0] || null, identification,
     browseUrls: browse.accepted.slice(0, CAPS.browse), targetIssueUrls: targetUrls, categoryUrls: selectedCategories.map(c => c.url),
     categoryUrlsAccepted: categoryAccepted.length, categoryUrlsRejected: categoryResults.reduce((n, r) => n + r.rejected, 0),
     targetPagesFetched: targetPages.length + categoryPages.length, noticesFromTargetIssue: notices.length,
     categories: [...new Set([...selectedCategories.map(c => c.label), ...notices.map(n => n.category)].filter(Boolean))],
-    noticeCount: notices.length, sampleNotices: notices.slice(0, CAPS.samples),
+    noticeCount: notices.length, sampleNotices: notices.slice(0, CAPS.samples), pageDiagnostics,
     reason: success ? null : targetPages.length + categoryPages.length === 0 ? 'No target issue or category page was successfully fetched' : 'No notices were enumerated from the target issue chain' };
 }
 
@@ -534,6 +535,57 @@ function noticeLinks(html, base) {
   const out = [];
   for (const a of anchors(html)) { const url = allowedDcRegsUrl(a.href, base); const id = url && match(url, /NoticeId=([Nn]\d+)/i)?.toUpperCase(); if (id) out.push({ noticeId: id, title: a.text, category: null, agency: null, detailUrl: url }); }
   return out;
+}
+
+export function diagnoseDcregsPage(page, categoryLabel = null) {
+  const html = String(page?.body || '');
+  const anchorElements = [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)];
+  const candidates = [];
+  const elementPattern = /<(a|input|button)\b([^>]*)(?:>([\s\S]*?)<\/\1>)?/gi;
+  const diagnosticElements = [...html.matchAll(elementPattern)];
+  for (const element of diagnosticElements) {
+    const tag = element[1].toLowerCase(); const attrs = element[2] || ''; const elementText = clean(element[3]);
+    const hrefRaw = urlAttribute(attrs, 'href'); const onclick = decodeHtmlAttributeValue(attribute(attrs, 'onclick'));
+    const id = attribute(attrs, 'id'); const name = attribute(attrs, 'name'); const type = attribute(attrs, 'type'); const value = attribute(attrs, 'value');
+    if (/^__/.test(name || '') || (/^hidden$/i.test(type || '') && /^__/.test(id || ''))) continue;
+    const combined = `${attrs} ${elementText}`;
+    const strongSignal = /NoticeId|NoticeDetail\.aspx|\bN\d{5,}\b/i.test(combined);
+    const linkButtonSignal = /LinkButton|__doPostBack/i.test(combined) && /notice|view|\bN\d{5,}\b/i.test(combined);
+    if (!(strongSignal || linkButtonSignal)) continue;
+    const postback = onclick?.match(/__doPostBack\(\s*['"]([A-Za-z0-9_$:.\-]+)['"]\s*,\s*['"]([A-Za-z0-9_$:.\-]*)['"]\s*\)/i);
+    const windowOpen = onclick?.match(/window\.open\(\s*['"]([^'"]+)['"]/i);
+    candidates.push({
+      tag, text: safeDiagnosticText(elementText), href: hrefRaw ? allowedDcRegsUrl(hrefRaw, page.targetUrl) : null,
+      id: safeCandidateAttribute(id), name: safeCandidateAttribute(name), type: safeCandidateAttribute(type), value: safeCandidateAttribute(value),
+      hasDoPostBack: /__doPostBack/i.test(onclick || ''), eventTarget: postback?.[1] || null, eventArgument: postback?.[2] || null,
+      hasWindowOpen: /window\.open/i.test(onclick || ''), allowedWindowOpenUrl: windowOpen ? allowedDcRegsUrl(windowOpen[1], page.targetUrl) : null
+    });
+    if (candidates.length === 10) break;
+  }
+  const rawSignals = {
+    noticeIdEquals: countMatches(html, /NoticeId=/gi), noticeDetailAspx: countMatches(html, /NoticeDetail\.aspx/gi),
+    noticeNumber: countMatches(html, /\bN\d{5,}\b/g), doPostBack: countMatches(html, /__doPostBack/gi), linkButton: countMatches(html, /LinkButton/gi)
+  };
+  return {
+    url: allowedDcRegsUrl(page?.targetUrl), status: Number.isInteger(page?.status) ? page.status : null,
+    structuralValid: Boolean(page?.contentValidation?.structuralValid), categoryLabel: safeAttribute(categoryLabel),
+    characterLength: Number.isInteger(page?.characterLength) ? page.characterLength : html.length,
+    totalAnchorCount: anchorElements.length,
+    anchorsContainingNoticeIdCount: anchorElements.filter(anchor => /NoticeId/i.test(anchor[1] + ' ' + clean(anchor[2]))).length,
+    rawNoticeIdOccurrenceCount: rawSignals.noticeIdEquals,
+    noticeDetailStringOccurrenceCount: rawSignals.noticeDetailAspx,
+    hasAspNetViewState: /name\s*=\s*["']__VIEWSTATE["']/i.test(html),
+    hasEventValidation: /name\s*=\s*["']__EVENTVALIDATION["']/i.test(html),
+    hasEventTarget: /name\s*=\s*["']__EVENTTARGET["']/i.test(html),
+    inputCount: countMatches(html, /<input\b/gi), buttonCount: countMatches(html, /<button\b/gi),
+    linkButtonLikeCount: diagnosticElements.filter(element => /LinkButton/i.test(element[2] || '')).length,
+    rawSignalCounts: rawSignals, noticeCandidates: candidates
+  };
+}
+function countMatches(value, pattern) { return [...String(value || '').matchAll(pattern)].length; }
+function safeDiagnosticText(value) { return safeCandidateAttribute(value, 160); }
+function safeCandidateAttribute(value, limit = 200) {
+  return value ? clean(value).replace(/(?:https?:)?\/\/[^\s]+/gi, '[url]').slice(0, limit) || null : null;
 }
 function anchors(html) { return [...String(html || '').matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)].map(m => ({ attrs: m[1], href: decodeHtmlAttributeValue(match(m[1], /href\s*=\s*["']([^"']+)/i)) || '', text: clean(m[2]) })); }
 function validate(values, base, cap = Infinity) { const accepted = []; let rejected = 0; for (const value of values) { const url = allowedDcRegsUrl(value, base); if (!url) rejected++; else if (!accepted.includes(url) && accepted.length < cap) accepted.push(url); } return { accepted, rejected }; }

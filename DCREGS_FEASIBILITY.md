@@ -28,4 +28,6 @@ When structured table/cell parsing misses Notice Detail metadata, the diagnostic
 
 URL-bearing HTML attributes are entity-decoded before URL parsing and allowlist validation. This converts encoded query separators such as `&amp;`, `&#38;`, and `&#x26;` into real separators while preserving the exact HTTPS DCRegs hostname restrictions.
 
+Fetched target-issue and category pages include bounded structural diagnostics and raw-signal integer counts. Each page reports at most ten sanitized notice-related element candidates; raw HTML, onclick code, ASP.NET state values, cookies, external URLs, and surrounding snippets are excluded. These diagnostics do not alter notice enumeration or viability rules.
+
 This spike does **not** establish that ingestion is viable unless the September 18, 2026 issue is positively identified, a target issue or descended category page is fetched, and at least one notice is enumerated from that target chain. Generic browse-page notices and successful parsing of the two known individual notices do not count. No production workflow, tracked item, candidate record, report, schedule, or database table is created or modified.

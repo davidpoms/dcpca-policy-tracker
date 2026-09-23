@@ -119,6 +119,34 @@ test('entity-encoded category link is fetched and returned with normal query par
   });
 });
 
+test('category page diagnostics count raw signals and sanitize bounded candidates', () => {
+  const noticeAnchors = Array.from({ length: 12 }, (_, index) => {
+    const href = index === 0
+      ? `https://evil.test/NoticeDetail.aspx?NoticeId=N${10000 + index}`
+      : `/Common/NoticeDetail.aspx?NoticeId=N${10000 + index}`;
+    return `<a id="notice${index}" href="${href}">${'Notice N' + (10000 + index) + ' title '.repeat(30)}</a>`;
+  }).join('');
+  const html = `<html><body><input type="hidden" name="__VIEWSTATE" value="state-secret"><input type="hidden" name="__EVENTVALIDATION" value="validation-secret"><input name="__EVENTTARGET">
+    <input id="ctl_LinkButton" name="ctl_LinkButton" type="button" value="View Notice N12345" onclick="__doPostBack('ctl_LinkButton','N12345')">
+    ${noticeAnchors}<button>Other</button><script>const cookie='cookie-secret';</script></body></html>`;
+  const diagnostic = route.diagnoseDcregsPage({
+    body: html, targetUrl: 'https://www.dcregs.dc.gov/Common/DCR/Issues/IssueCategoryList.aspx?CategoryID=16&IssueID=1209',
+    status: 200, characterLength: html.length, contentValidation: { structuralValid: true }
+  }, 'Public Hearings');
+  assert.equal(diagnostic.totalAnchorCount, 12); assert.equal(diagnostic.anchorsContainingNoticeIdCount, 12);
+  assert.equal(diagnostic.rawNoticeIdOccurrenceCount, 12); assert.equal(diagnostic.noticeDetailStringOccurrenceCount, 12);
+  assert.deepEqual(diagnostic.rawSignalCounts, { noticeIdEquals: 12, noticeDetailAspx: 12, noticeNumber: 25, doPostBack: 1, linkButton: 2 });
+  assert.equal(diagnostic.hasAspNetViewState, true); assert.equal(diagnostic.hasEventValidation, true); assert.equal(diagnostic.hasEventTarget, true);
+  assert.equal(diagnostic.inputCount, 4); assert.equal(diagnostic.buttonCount, 1); assert.equal(diagnostic.linkButtonLikeCount, 1);
+  assert.equal(diagnostic.noticeCandidates.length, 10);
+  assert.equal(diagnostic.noticeCandidates[0].hasDoPostBack, true);
+  assert.equal(diagnostic.noticeCandidates[0].eventTarget, 'ctl_LinkButton'); assert.equal(diagnostic.noticeCandidates[0].eventArgument, 'N12345');
+  assert.equal(diagnostic.noticeCandidates[1].href, null);
+  assert.ok(diagnostic.noticeCandidates.every(candidate => !candidate.text || candidate.text.length <= 160));
+  const json = JSON.stringify(diagnostic);
+  assert.doesNotMatch(json, /<a|onclick|__doPostBack|state-secret|validation-secret|cookie-secret|evil\.test/i);
+});
+
 test('external form action is reported as rejected and never fetched', async () => {
   const altered = n539.replace('<body>', '<body><form action="https://evil.test/submit">');
   const calls = [];
