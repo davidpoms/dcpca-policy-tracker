@@ -22,6 +22,7 @@ const internalTables = [
 const legacyPublicReadTables = internalTables.filter(table => table !== 'bill_status_history');
 const canonical = read('rls-migration.sql');
 const migration = read('migrations/2026-09-23-tighten-server-read-boundary-rls.sql');
+const cacheMigration = read('migrations/2026-09-23-tighten-lims-bill-cache-rls.sql');
 
 test('canonical RLS keeps internal tracker tables enabled without anon or public read policies', () => {
   for (const table of internalTables) {
@@ -49,18 +50,22 @@ test('versioned migration removes every evidenced read policy and creates no rep
   assert.doesNotMatch(migration, /FOR\s+(?:INSERT|UPDATE|DELETE)|DISABLE ROW LEVEL SECURITY/i);
 });
 
-test('lims cache remains the sole canonical anonymous browser read policy', () => {
+test('lims cache RLS removes anonymous reads without a replacement policy', () => {
   assert.match(canonical, /ALTER TABLE lims_bill_cache ENABLE ROW LEVEL SECURITY;/);
-  assert.match(canonical, /CREATE POLICY "anon can read lims_bill_cache" ON lims_bill_cache FOR SELECT TO anon USING \(true\);/);
+  assert.match(canonical, /DROP POLICY IF EXISTS "anon can read lims_bill_cache" ON lims_bill_cache;/);
+  assert.doesNotMatch(canonical, /CREATE POLICY\s+"[^"]+"\s+ON\s+(?:public\.)?lims_bill_cache\s+FOR SELECT\s+TO\s+(?:anon|public)/i);
   assert.doesNotMatch(migration, /lims_bill_cache/);
+
+  assert.match(cacheMigration, /BEGIN;[\s\S]*COMMIT;/);
+  assert.match(cacheMigration, /ALTER TABLE public\.lims_bill_cache ENABLE ROW LEVEL SECURITY;/);
+  assert.match(cacheMigration, /DROP POLICY IF EXISTS "anon can read lims_bill_cache" ON public\.lims_bill_cache;/);
+  assert.doesNotMatch(cacheMigration, /CREATE POLICY/i);
+  assert.doesNotMatch(cacheMigration, /\b(?:GRANT|REVOKE)\b/i);
+  assert.doesNotMatch(cacheMigration, /FOR\s+(?:INSERT|UPDATE|DELETE)|DISABLE ROW LEVEL SECURITY/i);
 
   const anonSelects = [...canonical.matchAll(/CREATE POLICY\s+"([^"]+)"\s+ON\s+(\w+)\s+FOR SELECT\s+TO\s+(anon|public)/gi)]
     .map(([, name, table, role]) => ({ name, table, role: role.toLowerCase() }));
-  assert.deepEqual(anonSelects, [{
-    name: 'anon can read lims_bill_cache',
-    table: 'lims_bill_cache',
-    role: 'anon'
-  }]);
+  assert.deepEqual(anonSelects, []);
 });
 
 test('write restrictions and server-only table access remain closed', () => {
@@ -80,7 +85,7 @@ test('write restrictions and server-only table access remain closed', () => {
   assert.doesNotMatch(allSql, /\b(?:GRANT|REVOKE)\b[\s\S]*?\b(?:anon|public)\b/i);
 });
 
-test('server read actions remain in app-data while the cache read policy awaits its separate migration', () => {
+test('server read actions remain in app-data after browser cache reads are closed', () => {
   const appData = read('api/app-data.js');
   const frontend = read('frontend/app.jsx');
   for (const action of ['app.bootstrap.read', 'activityLog.list', 'teamMembers.list', 'limsCache.committee.search', 'limsCache.sponsor.search']) {

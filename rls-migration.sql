@@ -106,13 +106,11 @@ DROP POLICY IF EXISTS "Allow public insert" ON tracked_agencies;
 DROP POLICY IF EXISTS "Allow public delete" ON tracked_agencies;
 
 -- ─── lims_bill_cache ──────────────────────────────────────────────────────────
--- Read-only from the browser; writes happen only via server-side cron
+-- Server-side only; reads use app-data and writes use the cache-builder cron
 
 ALTER TABLE lims_bill_cache ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "anon can read lims_bill_cache" ON lims_bill_cache;
-
-CREATE POLICY "anon can read lims_bill_cache" ON lims_bill_cache FOR SELECT TO anon USING (true);
 
 -- ─── activity_log ─────────────────────────────────────────────────────────────
 
