@@ -262,9 +262,12 @@ test('frontend read boundary preserves mappings and leaves no direct table reads
   assert.ok(updateBlock.indexOf('await refreshTeamMembers()') < updateBlock.indexOf('setEditingTeamMember(null)'));
   const directTables = [...app.matchAll(/supabase\s*\.from\('([^']+)'\)/g)].map(match => match[1]);
   assert.deepEqual(directTables, []);
-  assert.match(app, /initializeSupabase[\s\S]*?fetch\('\/api\/client-config'\)/);
+  assert.doesNotMatch(app, /initializeSupabase|\/api\/client-config|window\.supabase|createClient|SUPABASE_PUBLISHABLE_KEY/);
+  assert.match(app, /const root = ReactDOM\.createRoot\(document\.getElementById\('root'\)\);\s*root\.render\(<App \/>\);/);
+  assert.match(app, /useEffect\(\(\) => \{\s*checkSession\(\);\s*\}, \[\]\)/);
+  assert.match(bootstrap, /appDataRequest\(\{ action: 'app\.bootstrap\.read' \}\)/);
   assert.match(app, /action: 'limsCache\.committee\.search'/);
   assert.match(app, /action: 'limsCache\.sponsor\.search'/);
   const apiCount = fs.readdirSync(path.join(root, 'api')).filter(file => file.endsWith('.js')).length;
-  assert.equal(apiCount, 12);
+  assert.equal(apiCount, 11);
 });

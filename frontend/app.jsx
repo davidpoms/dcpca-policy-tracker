@@ -1,20 +1,6 @@
 
         const { useState, useEffect } = React;
 
-        let supabase;
-
-        async function initializeSupabase() {
-            const response = await fetch('/api/client-config');
-            if (!response.ok) throw new Error('Client configuration is unavailable.');
-
-            const config = await response.json();
-            if (!config.SUPABASE_URL || !config.SUPABASE_PUBLISHABLE_KEY) {
-                throw new Error('Client configuration is incomplete.');
-            }
-
-            supabase = window.supabase.createClient(config.SUPABASE_URL, config.SUPABASE_PUBLISHABLE_KEY);
-        }
-
         function App() {
             const [authenticated, setAuthenticated] = useState(false);
             const [passwordInput, setPasswordInput] = useState('');
@@ -2170,9 +2156,4 @@
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        initializeSupabase()
-            .then(() => root.render(<App />))
-            .catch(error => {
-                console.error('Failed to initialize the application:', error);
-                root.render(<div style={{ padding: 24, fontFamily: 'sans-serif' }}>Unable to load application configuration.</div>);
-            });
+        root.render(<App />);

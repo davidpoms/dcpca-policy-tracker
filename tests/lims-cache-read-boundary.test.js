@@ -201,5 +201,5 @@ test('frontend uses app-data while preserving cache mappings and local continuat
   const appData = fs.readFileSync(path.join(root, 'api/app-data.js'), 'utf8');
   assert.doesNotMatch(appData, /body\.(?:table|field|operator|query|columns|order|limit)/);
   assert.match(appData, /validateSignedSession/);
-  assert.equal(fs.readdirSync(path.join(root, 'api')).filter(file => file.endsWith('.js')).length, 12);
+  assert.equal(fs.readdirSync(path.join(root, 'api')).filter(file => file.endsWith('.js')).length, 11);
 });

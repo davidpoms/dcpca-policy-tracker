@@ -96,5 +96,5 @@ test('server read actions remain in app-data after browser cache reads are close
 
   const directTables = [...frontend.matchAll(/supabase\s*\.from\('([^']+)'\)/g)].map(match => match[1]);
   assert.deepEqual(directTables, []);
-  assert.equal(fs.readdirSync(path.join(root, 'api')).filter(file => file.endsWith('.js')).length, 12);
+  assert.equal(fs.readdirSync(path.join(root, 'api')).filter(file => file.endsWith('.js')).length, 11);
 });

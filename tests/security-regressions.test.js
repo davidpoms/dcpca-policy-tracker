@@ -598,72 +598,21 @@ test('api/logout.js clears the session cookie', async () => {
   assert.equal(res.headers['Cache-Control'], 'no-store');
 });
 
-test('api/client-config.js does not expose SESSION_SECRET', async () => {
-  const handler = await importFresh('api/client-config.js');
-
-  await withEnv({
-    SUPABASE_URL: 'https://example.supabase.co',
-    SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_example',
-    SESSION_SECRET: 'super-secret-session-value'
-  }, async () => {
-    const req = { method: 'GET' };
-    const res = makeRes();
-
-    await handler(req, res);
-
-    assert.equal(res.statusCode, 200);
-    assert.deepEqual(Object.keys(res.body).sort(), ['SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_URL']);
-    assert.ok(!('SESSION_SECRET' in res.body));
-  });
-});
-
-test('api/client-config.js returns only the required browser config values', async () => {
-  const handler = await importFresh('api/client-config.js');
-
-  await withEnv({
-    SUPABASE_URL: 'https://example.supabase.co',
-    SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_example',
-    SUPABASE_SERVICE_KEY: 'service-key',
-    CRON_SECRET: 'cron-secret',
-    APP_PASSWORD: 'app-password',
-    AZURE_CLIENT_ID: 'azure-client',
-    GMAIL_PASSWORD: 'gmail-password'
-  }, async () => {
-    const req = { method: 'GET' };
-    const res = makeRes();
-
-    await handler(req, res);
-
-    assert.equal(res.statusCode, 200);
-    assert.deepEqual(Object.keys(res.body).sort(), ['SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_URL']);
-    assert.equal(res.body.SUPABASE_URL, 'https://example.supabase.co');
-    assert.equal(res.body.SUPABASE_PUBLISHABLE_KEY, 'sb_publishable_example');
-    assert.ok(!('SUPABASE_SERVICE_KEY' in res.body));
-    assert.ok(!('CRON_SECRET' in res.body));
-    assert.ok(!('APP_PASSWORD' in res.body));
-    assert.ok(!('AZURE_CLIENT_ID' in res.body));
-    assert.ok(!('GMAIL_PASSWORD' in res.body));
-  });
-});
-
-test('api/client-config.js fails when required values are absent', async () => {
-  const handler = await importFresh('api/client-config.js');
-
-  const req = { method: 'GET' };
-
-  await withEnv({ SUPABASE_URL: undefined, SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_example' }, async () => {
-    const res = makeRes();
-    await handler(req, res);
-    assert.equal(res.statusCode, 500);
-    assert.equal(res.body.error, 'Client configuration is not available');
-  });
-
-  await withEnv({ SUPABASE_URL: 'https://example.supabase.co', SUPABASE_PUBLISHABLE_KEY: undefined }, async () => {
-    const res = makeRes();
-    await handler(req, res);
-    assert.equal(res.statusCode, 500);
-    assert.equal(res.body.error, 'Client configuration is not available');
-  });
+test('browser Supabase client and public configuration endpoint remain removed', () => {
+  const browserFiles = [
+    'index.html',
+    ...fs.readdirSync(path.join(root, 'frontend'))
+      .filter(file => /\.(?:js|jsx)$/.test(file))
+      .map(file => path.join('frontend', file))
+  ];
+  const browserText = browserFiles.map(readRepoText).join('\n');
+  assert.equal(fs.existsSync(path.join(root, 'api/client-config.js')), false);
+  assert.doesNotMatch(browserText, /window\.supabase|createClient|initializeSupabase|\/api\/client-config|SUPABASE_PUBLISHABLE_KEY|supabase\s*\.from\s*\(/);
+  assert.doesNotMatch(readRepoText('index.html'), /supabase-js|cdn\.jsdelivr\.net/i);
+  const csp = readRepoText('vercel.json');
+  assert.doesNotMatch(csp, /\*\.supabase\.co|cdn\.jsdelivr\.net/i);
+  assert.match(csp, /https:\/\/lims\.dccouncil\.gov/);
+  assert.equal(collectApiFiles().length, 11);
 });
 
 test('api/app-data.js guards auth, request payloads, and the eight allowed actions with generic errors', async () => {

@@ -1,5 +1,7 @@
 # Phase 2A API Map
 
+> **Status (2026-09-23):** This file retains the Phase 2 rollout history. All browser Supabase table reads and writes have since moved behind authenticated server actions, anonymous tracker/cache policies have been removed, and the browser Supabase client is no longer part of the current architecture.
+
 ## Scope and constraints
 
 This document describes the consolidated authenticated application API route:

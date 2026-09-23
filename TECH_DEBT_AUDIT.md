@@ -3,11 +3,13 @@
 Audit date: 2026-09-22
 Base commit: `bb6009c`
 
+Status update (2026-09-23): SEC-01 and SEC-02 below are resolved. Authenticated fixed server actions now cover browser data access, anonymous tracker/cache reads have been removed, `/api/hello` is session/cron authenticated with three fixed LIMS contracts, and the browser Supabase client has been removed. Their original findings remain for audit history.
+
 ## Executive Summary
 
-Phase 2 closed the most urgent integrity gap: the browser no longer writes application tables directly. Signed, HttpOnly sessions gate explicit `/api/app-data` actions, and canonical RLS now permits anonymous reads only. Phase 3 also separated the browser LIMS helpers and the page shell from the application entry.
+Phase 2 closed the most urgent integrity gap: the browser no longer accesses application tables directly. Signed, HttpOnly sessions gate explicit `/api/app-data` actions, and canonical RLS no longer permits anonymous tracker/cache access. Phase 3 also separated the browser LIMS helpers and the page shell from the application entry.
 
-The remaining work is primarily architecture and operations, with two material boundary gaps. The Supabase publishable client can still anonymously read every tracker table the UI loads, including notes, assignments, team email addresses, history, and activity. Separately, `/api/hello` is a CORS-enabled proxy that accepts a caller-controlled LIMS API path, method, and POST body. It fixes the host but does not constrain the LIMS operation or require the staff session.
+The two material security boundary gaps identified in this audit have since been closed. Remaining work is primarily product architecture and operations.
 
 Council Period 27 is the nearest product risk. Interactive LIMS search is period-selectable, but the cache builder and cron keyword search are hard-coded to 26. Tracked B26/PR26 records do not have a separate council-period field and should remain independently trackable; changing active discovery must not become a bulk data migration or a filter that hides historical work.
 
@@ -24,7 +26,7 @@ The redesign should establish explicit lifecycle and queue concepts before its n
 
 ## Current Findings
 
-### SEC-01 — Anonymous read policies expose the complete internal tracker dataset
+### SEC-01 — RESOLVED: anonymous read policies exposed the internal tracker dataset
 
 - **Severity:** High — security risk / redesign prerequisite
 - **Area:** Data-access boundary
@@ -34,7 +36,7 @@ The redesign should establish explicit lifecycle and queue concepts before its n
 - **Blocks redesign:** Yes, before a richer Work Queue or assignment workflow increases sensitive content.
 - **Before Council 27:** Recommended; it is not mechanically required for rollover.
 
-### SEC-02 — `/api/hello` is an unauthenticated, caller-parameterized LIMS proxy
+### SEC-02 — RESOLVED: `/api/hello` was an unauthenticated, caller-parameterized LIMS proxy
 
 - **Severity:** High — security and operational risk
 - **Area:** Server API boundary

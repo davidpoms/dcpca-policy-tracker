@@ -23,7 +23,6 @@ test('page shell loads one external Babel entry after CDN and classic scripts', 
     'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js',
     'https://unpkg.com/@babel/standalone@7.23.10/babel.min.js',
     'https://cdn.tailwindcss.com/3.4.1',
-    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js',
     'frontend/lims-normalization.js',
     'frontend/lims-activity.js',
     'frontend/lims-hearings.js',
@@ -33,10 +32,10 @@ test('page shell loads one external Babel entry after CDN and classic scripts', 
   assert.match(page, /<script type="text\/babel" src="frontend\/app\.jsx"><\/script>/);
   assert.doesNotMatch(page, /<script type="text\/babel">/);
   assert.equal((page.match(/type="text\/babel"/g) || []).length, 1);
-  assert.doesNotMatch(page, /function App\(|function DCPolicyTracker\(|initializeSupabase\(/);
+  assert.doesNotMatch(page, /function App\(|function DCPolicyTracker\(/);
   assert.match(html, /function App\(\)/);
   assert.match(html, /function DCPolicyTracker\(\{ onLogout \}\)/);
-  assert.match(html, /const root = ReactDOM\.createRoot\(document\.getElementById\('root'\)\);[\s\S]*?initializeSupabase\(\)[\s\S]*?\.then\(\(\) => root\.render\(<App \/>\)\)/);
+  assert.match(html, /const root = ReactDOM\.createRoot\(document\.getElementById\('root'\)\);\s*root\.render\(<App \/>\);/);
 });
 
 test('app-data transport sends the exact JSON POST and returns the raw response', async () => {

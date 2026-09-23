@@ -1,5 +1,7 @@
 # AUTH_RLS_PLAN.md
 
+> **Status (2026-09-23):** This document records the original architecture and migration plan. The signed HttpOnly session, fixed server read/write actions, RLS tightening, and removal of the browser Supabase client are now complete. Descriptions below of direct browser access, sessionStorage, and anonymous table policies are historical.
+
 ## 1. Exact current trust boundary and data flow
 
 This application is currently split between a browser-only shared-password gate and a browser-connected Supabase client that accesses database tables directly with the Supabase publishable/anon key.
